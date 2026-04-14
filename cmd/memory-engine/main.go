@@ -17,6 +17,7 @@ import (
 	"github.com/sophia-engine/memory-engine/internal/application/decisions"
 	"github.com/sophia-engine/memory-engine/internal/application/heuristics"
 	"github.com/sophia-engine/memory-engine/internal/application/ingest"
+	"github.com/sophia-engine/memory-engine/internal/application/relations"
 	"github.com/sophia-engine/memory-engine/internal/application/retrieval"
 	"github.com/sophia-engine/memory-engine/internal/domain/shared"
 	"github.com/sophia-engine/memory-engine/internal/infrastructure/config"
@@ -88,10 +89,11 @@ func main() {
 	memorySvc := ingest.NewService(memRepo, searchIdx, eventPub, clock)
 	decisionSvc := decisions.NewService(decRepo, relRepo, txMgr, eventPub, clock)
 	heuristicSvc := heuristics.NewService(heurRepo, txMgr, eventPub, clock)
+	relationSvc := relations.NewService(relRepo, eventPub, clock)
 	searchSvc := retrieval.NewSearchService(searchIdx, memRepo, cfg.Retrieval, clock)
 
 	// HTTP.
-	router := apphttp.NewRouter(memorySvc, decisionSvc, heuristicSvc, searchSvc)
+	router := apphttp.NewRouter(memorySvc, decisionSvc, heuristicSvc, relationSvc, searchSvc)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	server := &gohttp.Server{

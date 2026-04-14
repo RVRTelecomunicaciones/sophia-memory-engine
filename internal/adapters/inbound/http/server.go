@@ -14,6 +14,7 @@ func NewRouter(
 	memorySvc inbound.MemoryService,
 	decisionSvc inbound.DecisionService,
 	heuristicSvc inbound.HeuristicService,
+	relationSvc inbound.RelationService,
 	searchSvc *retrieval.SearchService,
 ) chi.Router {
 	r := chi.NewRouter()
@@ -39,6 +40,11 @@ func NewRouter(
 		r.Get("/heuristics/active/{key}", heurHandler.GetActive)
 		r.Get("/heuristics", heurHandler.ListByScope)
 		r.Post("/heuristics/{id}/toggle", heurHandler.Toggle)
+
+		relHandler := NewRelationHandler(relationSvc)
+		r.Post("/relations", relHandler.Create)
+		r.Get("/relations/from/{id}", relHandler.GetFrom)
+		r.Get("/relations/to/{id}", relHandler.GetTo)
 
 		retHandler := NewRetrievalHandler(searchSvc)
 		r.Post("/search", retHandler.Search)
