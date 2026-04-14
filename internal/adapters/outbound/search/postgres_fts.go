@@ -108,6 +108,7 @@ func (idx *PostgresFTSIndex) Search(ctx context.Context, query outbound.FTSQuery
 	sql := fmt.Sprintf(`
 		SELECT id, 'memory' AS record_type,
 			ts_rank(search_vector, plainto_tsquery('spanish', $1)) AS rank,
+			similarity(content, $1) AS trgm_score,
 			ts_headline('spanish', content, plainto_tsquery('spanish', $1),
 				'StartSel=**,StopSel=**,MaxWords=35,MinWords=15') AS snippet
 		FROM memories
@@ -127,13 +128,14 @@ func (idx *PostgresFTSIndex) Search(ctx context.Context, query outbound.FTSQuery
 	var results []outbound.FTSResult
 	for rows.Next() {
 		var (
-			idStr      string
-			recordType string
-			rank       float64
-			snippet    string
+			idStr        string
+			recordType   string
+			rank         float64
+			trigramScore float64
+			snippet      string
 		)
 
-		if err := rows.Scan(&idStr, &recordType, &rank, &snippet); err != nil {
+		if err := rows.Scan(&idStr, &recordType, &rank, &trigramScore, &snippet); err != nil {
 			return nil, err
 		}
 
@@ -143,10 +145,11 @@ func (idx *PostgresFTSIndex) Search(ctx context.Context, query outbound.FTSQuery
 		}
 
 		results = append(results, outbound.FTSResult{
-			ID:         recordID,
-			RecordType: recordType,
-			Rank:       rank,
-			Snippet:    snippet,
+			ID:           recordID,
+			RecordType:   recordType,
+			Rank:         rank,
+			TrigramScore: trigramScore,
+			Snippet:      snippet,
 		})
 	}
 

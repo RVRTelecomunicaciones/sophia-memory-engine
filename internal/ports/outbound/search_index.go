@@ -31,10 +31,11 @@ type FTSQuery struct {
 
 // FTSResult represents a single full-text search hit with relevance ranking.
 type FTSResult struct {
-	ID         shared.RecordID
-	RecordType string
-	Rank       float64
-	Snippet    string
+	ID           shared.RecordID
+	RecordType   string
+	Rank         float64
+	TrigramScore float64
+	Snippet      string
 }
 
 // SearchIndex is a read-model port for full-text search operations.

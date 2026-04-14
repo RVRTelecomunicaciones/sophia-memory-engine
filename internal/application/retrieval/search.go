@@ -80,7 +80,7 @@ func (s *SearchService) Search(ctx context.Context, query inbound.SearchQuery) (
 
 		signals := RankingSignals{
 			FTSScore:        r.Rank,
-			TRGMScore:       0.0, // placeholder — will come from PG similarity()
+			TRGMScore:       r.TrigramScore,
 			RecencyBoost:    recencyBoost,
 			ImportanceScore: 0.5, // default — will load from record later
 			TypeBoost:       0.5, // memories default (decisions=0.8, heuristics=0.7)

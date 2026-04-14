@@ -71,19 +71,22 @@ func (b *ContextBuilder) BuildContext(ctx context.Context, req inbound.ContextRe
 	budget := b.allocateBudget(maxTokens)
 
 	var (
-		scanned  int
-		included int
+		scanned   int
+		included  int
+		truncated bool
 	)
 
 	// 1. Fetch active decisions (always, regardless of query).
-	decSection, decScanned := b.fetchDecisions(ctx, req.Scope, budget.decisions)
+	decSection, decScanned, decTrunc := b.fetchDecisions(ctx, req.Scope, budget.decisions)
 	scanned += decScanned
 	included += len(decSection.Records)
+	truncated = truncated || decTrunc
 
 	// 2. Fetch enabled heuristics (always, regardless of query).
-	heurSection, heurScanned := b.fetchHeuristics(ctx, req.Scope, budget.heuristics)
+	heurSection, heurScanned, heurTrunc := b.fetchHeuristics(ctx, req.Scope, budget.heuristics)
 	scanned += heurScanned
 	included += len(heurSection.Records)
+	truncated = truncated || heurTrunc
 
 	// 3. Fetch memories via FTS (only if query provided).
 	var episodicSection inbound.ContextSection
@@ -101,9 +104,11 @@ func (b *ContextBuilder) BuildContext(ctx context.Context, req inbound.ContextRe
 
 		episodicBudget := budget.episodic + budget.semantic + extraBudget
 		var memScanned int
-		episodicSection, memScanned = b.fetchMemories(ctx, req.Scope, *req.Query, episodicBudget)
+		var memTrunc bool
+		episodicSection, memScanned, memTrunc = b.fetchMemories(ctx, req.Scope, *req.Query, episodicBudget)
 		scanned += memScanned
 		included += len(episodicSection.Records)
+		truncated = truncated || memTrunc
 	}
 
 	// 4. Graph expansion (optional).
@@ -156,7 +161,7 @@ func (b *ContextBuilder) BuildContext(ctx context.Context, req inbound.ContextRe
 	return &inbound.ContextBundle{
 		Sections:    sections,
 		TotalTokens: totalTokens,
-		Truncated:   totalTokens >= maxTokens,
+		Truncated:   truncated,
 		GeneratedAt: b.clock.Now(),
 		ScopeUsed:   req.Scope,
 		DebugInfo: &inbound.ContextDebugInfo{
@@ -222,21 +227,23 @@ func compactContent(content string, summary *string, tokenBudget int) string {
 }
 
 // fetchDecisions retrieves all active decisions by scope and compacts them into a section.
-func (b *ContextBuilder) fetchDecisions(ctx context.Context, scope shared.Scope, tokenBudget int) (inbound.ContextSection, int) {
+func (b *ContextBuilder) fetchDecisions(ctx context.Context, scope shared.Scope, tokenBudget int) (inbound.ContextSection, int, bool) {
 	section := inbound.ContextSection{Type: "decisions"}
 
 	decisions, err := b.decRepo.FindActiveByScope(ctx, scope)
 	if err != nil {
-		return section, 0
+		return section, 0, false
 	}
 
 	scanned := len(decisions)
 	usedTokens := 0
+	wasTruncated := false
 
 	for _, d := range decisions {
 		content := d.Title + ": " + d.Rationale
 		available := tokenBudget - usedTokens
 		if available <= 0 {
+			wasTruncated = true
 			break
 		}
 
@@ -253,26 +260,28 @@ func (b *ContextBuilder) fetchDecisions(ctx context.Context, scope shared.Scope,
 	}
 
 	section.TokenCount = usedTokens
-	return section, scanned
+	return section, scanned, wasTruncated
 }
 
 // fetchHeuristics retrieves all enabled heuristics by scope and compacts them into a section.
-func (b *ContextBuilder) fetchHeuristics(ctx context.Context, scope shared.Scope, tokenBudget int) (inbound.ContextSection, int) {
+func (b *ContextBuilder) fetchHeuristics(ctx context.Context, scope shared.Scope, tokenBudget int) (inbound.ContextSection, int, bool) {
 	section := inbound.ContextSection{Type: "heuristics"}
 
 	enabled := true
 	rules, err := b.heurRepo.FindByScope(ctx, scope, &enabled)
 	if err != nil {
-		return section, 0
+		return section, 0, false
 	}
 
 	scanned := len(rules)
 	usedTokens := 0
+	wasTruncated := false
 
 	for _, h := range rules {
 		content := h.Condition + " → " + h.Action
 		available := tokenBudget - usedTokens
 		if available <= 0 {
+			wasTruncated = true
 			break
 		}
 
@@ -289,12 +298,12 @@ func (b *ContextBuilder) fetchHeuristics(ctx context.Context, scope shared.Scope
 	}
 
 	section.TokenCount = usedTokens
-	return section, scanned
+	return section, scanned, wasTruncated
 }
 
 // fetchMemories searches via FTS and returns all results in a "recent_episodic" section.
 // Phase 2 can split into episodic vs semantic by memory type.
-func (b *ContextBuilder) fetchMemories(ctx context.Context, scope shared.Scope, query string, tokenBudget int) (inbound.ContextSection, int) {
+func (b *ContextBuilder) fetchMemories(ctx context.Context, scope shared.Scope, query string, tokenBudget int) (inbound.ContextSection, int, bool) {
 	section := inbound.ContextSection{Type: "recent_episodic"}
 
 	ftsQuery := outbound.FTSQuery{
@@ -305,7 +314,7 @@ func (b *ContextBuilder) fetchMemories(ctx context.Context, scope shared.Scope, 
 
 	ftsResults, err := b.searchIdx.Search(ctx, ftsQuery)
 	if err != nil {
-		return section, 0
+		return section, 0, false
 	}
 
 	scanned := len(ftsResults)
@@ -322,6 +331,7 @@ func (b *ContextBuilder) fetchMemories(ctx context.Context, scope shared.Scope, 
 		recency := ComputeRecencyBoost(r.ID.Time(), now)
 		score := ComputeFinalScore(b.config.Weights, RankingSignals{
 			FTSScore:        r.Rank,
+			TRGMScore:       r.TrigramScore,
 			RecencyBoost:    recency,
 			ImportanceScore: 0.5,
 			TypeBoost:       0.5,
@@ -336,9 +346,11 @@ func (b *ContextBuilder) fetchMemories(ctx context.Context, scope shared.Scope, 
 	})
 
 	usedTokens := 0
+	wasTruncated := false
 	for _, sr := range scored {
 		available := tokenBudget - usedTokens
 		if available <= 0 {
+			wasTruncated = true
 			break
 		}
 
@@ -356,7 +368,7 @@ func (b *ContextBuilder) fetchMemories(ctx context.Context, scope shared.Scope, 
 	}
 
 	section.TokenCount = usedTokens
-	return section, scanned
+	return section, scanned, wasTruncated
 }
 
 // collectTopRecordIDs gathers the top N record IDs from all sections for graph expansion.
