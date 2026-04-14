@@ -4,26 +4,13 @@ import (
 	"context"
 	"log/slog"
 	"sync"
-	"time"
 
 	"github.com/sophia-engine/memory-engine/internal/domain/shared"
+	"github.com/sophia-engine/memory-engine/internal/ports/outbound"
 )
 
-// DomainEvent represents a domain event published through the in-process bus.
-// Defined locally to avoid import cycle with ports/outbound.
-// Will be reconciled to use ports/outbound type when available.
-type DomainEvent struct {
-	ID            string
-	Type          shared.EventType
-	AggregateID   shared.RecordID
-	AggregateType string
-	Scope         shared.Scope
-	Payload       any
-	OccurredAt    time.Time
-}
-
 // EventHandler processes a domain event.
-type EventHandler func(ctx context.Context, event DomainEvent) error
+type EventHandler func(ctx context.Context, event outbound.DomainEvent) error
 
 // InProcessEventPublisher is a synchronous in-process event bus.
 // Handlers are invoked sequentially. On handler error, the error is logged
@@ -32,6 +19,9 @@ type InProcessEventPublisher struct {
 	mu       sync.RWMutex
 	handlers map[shared.EventType][]EventHandler
 }
+
+// Compile-time check: InProcessEventPublisher implements outbound.EventPublisher.
+var _ outbound.EventPublisher = (*InProcessEventPublisher)(nil)
 
 // NewInProcessEventPublisher creates a new in-process event publisher.
 func NewInProcessEventPublisher() *InProcessEventPublisher {
@@ -50,7 +40,7 @@ func (p *InProcessEventPublisher) Subscribe(eventType shared.EventType, handler 
 // Publish dispatches the event to all registered handlers for its type.
 // On handler error, the error is logged and processing continues.
 // Returns nil always (at-most-once semantics).
-func (p *InProcessEventPublisher) Publish(ctx context.Context, event DomainEvent) error {
+func (p *InProcessEventPublisher) Publish(ctx context.Context, event outbound.DomainEvent) error {
 	p.mu.RLock()
 	handlers := p.handlers[event.Type]
 	p.mu.RUnlock()

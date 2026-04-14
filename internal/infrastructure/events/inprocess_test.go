@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophia-engine/memory-engine/internal/domain/shared"
 	"github.com/sophia-engine/memory-engine/internal/infrastructure/events"
+	"github.com/sophia-engine/memory-engine/internal/ports/outbound"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -15,13 +16,13 @@ import (
 func TestInProcessEventPublisher_PublishAndSubscribe(t *testing.T) {
 	publisher := events.NewInProcessEventPublisher()
 
-	var received events.DomainEvent
-	publisher.Subscribe(shared.EventTypeMemoryIngested, func(ctx context.Context, event events.DomainEvent) error {
+	var received outbound.DomainEvent
+	publisher.Subscribe(shared.EventTypeMemoryIngested, func(ctx context.Context, event outbound.DomainEvent) error {
 		received = event
 		return nil
 	})
 
-	evt := events.DomainEvent{
+	evt := outbound.DomainEvent{
 		ID:            "test-event-001",
 		Type:          shared.EventTypeMemoryIngested,
 		AggregateID:   shared.NewRecordID(),
@@ -44,13 +45,12 @@ func TestInProcessEventPublisher_PublishAndSubscribe(t *testing.T) {
 func TestInProcessEventPublisher_NoSubscribers(t *testing.T) {
 	publisher := events.NewInProcessEventPublisher()
 
-	evt := events.DomainEvent{
+	evt := outbound.DomainEvent{
 		ID:            "test-event-002",
 		Type:          shared.EventTypeDecisionRecorded,
 		AggregateID:   shared.NewRecordID(),
 		AggregateType: "decision",
 		Scope:         shared.Scope{ProjectID: "test-project"},
-		Payload:       nil,
 		OccurredAt:    time.Now(),
 	}
 
@@ -63,19 +63,17 @@ func TestInProcessEventPublisher_HandlerErrorDoesNotStopProcessing(t *testing.T)
 
 	var callCount int
 
-	// First handler: fails
-	publisher.Subscribe(shared.EventTypeMemoryIngested, func(ctx context.Context, event events.DomainEvent) error {
+	publisher.Subscribe(shared.EventTypeMemoryIngested, func(ctx context.Context, event outbound.DomainEvent) error {
 		callCount++
 		return errors.New("handler failed")
 	})
 
-	// Second handler: succeeds
-	publisher.Subscribe(shared.EventTypeMemoryIngested, func(ctx context.Context, event events.DomainEvent) error {
+	publisher.Subscribe(shared.EventTypeMemoryIngested, func(ctx context.Context, event outbound.DomainEvent) error {
 		callCount++
 		return nil
 	})
 
-	evt := events.DomainEvent{
+	evt := outbound.DomainEvent{
 		ID:            "test-event-003",
 		Type:          shared.EventTypeMemoryIngested,
 		AggregateID:   shared.NewRecordID(),
@@ -94,29 +92,29 @@ func TestInProcessEventPublisher_MultipleEventTypes(t *testing.T) {
 
 	var memoryCount, decisionCount int
 
-	publisher.Subscribe(shared.EventTypeMemoryIngested, func(ctx context.Context, event events.DomainEvent) error {
+	publisher.Subscribe(shared.EventTypeMemoryIngested, func(ctx context.Context, event outbound.DomainEvent) error {
 		memoryCount++
 		return nil
 	})
 
-	publisher.Subscribe(shared.EventTypeDecisionRecorded, func(ctx context.Context, event events.DomainEvent) error {
+	publisher.Subscribe(shared.EventTypeDecisionRecorded, func(ctx context.Context, event outbound.DomainEvent) error {
 		decisionCount++
 		return nil
 	})
 
-	memEvt := events.DomainEvent{
-		ID:         "mem-001",
-		Type:       shared.EventTypeMemoryIngested,
+	memEvt := outbound.DomainEvent{
+		ID:          "mem-001",
+		Type:        shared.EventTypeMemoryIngested,
 		AggregateID: shared.NewRecordID(),
-		Scope:      shared.Scope{ProjectID: "test"},
-		OccurredAt: time.Now(),
+		Scope:       shared.Scope{ProjectID: "test"},
+		OccurredAt:  time.Now(),
 	}
-	decEvt := events.DomainEvent{
-		ID:         "dec-001",
-		Type:       shared.EventTypeDecisionRecorded,
+	decEvt := outbound.DomainEvent{
+		ID:          "dec-001",
+		Type:        shared.EventTypeDecisionRecorded,
 		AggregateID: shared.NewRecordID(),
-		Scope:      shared.Scope{ProjectID: "test"},
-		OccurredAt: time.Now(),
+		Scope:       shared.Scope{ProjectID: "test"},
+		OccurredAt:  time.Now(),
 	}
 
 	_ = publisher.Publish(context.Background(), memEvt)
