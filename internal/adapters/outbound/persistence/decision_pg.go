@@ -366,6 +366,49 @@ func (r *DecisionPgRepository) FindByKey(ctx context.Context, key string, scope 
 	return results, nil
 }
 
+// FindActiveByScope retrieves all active decisions for a given scope.
+func (r *DecisionPgRepository) FindActiveByScope(ctx context.Context, scope shared.Scope) ([]decision.Decision, error) {
+	conn := getConn(ctx, r.pool)
+
+	query := `SELECT` + decisionColumns + `
+		FROM decisions
+		WHERE status = 'active'
+		  AND project_id = $1
+		  AND ($2::text IS NULL OR tenant_id = $2)
+		  AND ($3::text IS NULL OR repo_id = $3)
+		  AND ($4::text IS NULL OR agent_id = $4)
+		  AND ($5::text IS NULL OR session_id = $5)
+		  AND ($6::text IS NULL OR environment = $6)
+		ORDER BY decision_key, version DESC`
+
+	rows, err := conn.Query(ctx, query,
+		scope.ProjectID,
+		ptrStr(scope.TenantID),
+		ptrStr(scope.RepoID),
+		ptrStr(scope.AgentID),
+		ptrStr(scope.SessionID),
+		ptrStr(scope.Environment),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []decision.Decision
+	for rows.Next() {
+		d, err := scanDecisionRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, *d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
 // UpdateStatus changes the status and optional superseded_by of a decision.
 // Returns shared.ErrNotFound if no rows are affected.
 func (r *DecisionPgRepository) UpdateStatus(ctx context.Context, id shared.RecordID, status shared.DecisionStatus, supersededBy *shared.RecordID) error {

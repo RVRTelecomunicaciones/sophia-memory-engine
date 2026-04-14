@@ -16,6 +16,7 @@ func NewRouter(
 	heuristicSvc inbound.HeuristicService,
 	relationSvc inbound.RelationService,
 	searchSvc *retrieval.SearchService,
+	ctxBuilder *retrieval.ContextBuilder,
 ) chi.Router {
 	r := chi.NewRouter()
 	r.Use(chiMiddleware.RequestID)
@@ -46,8 +47,9 @@ func NewRouter(
 		r.Get("/relations/from/{id}", relHandler.GetFrom)
 		r.Get("/relations/to/{id}", relHandler.GetTo)
 
-		retHandler := NewRetrievalHandler(searchSvc)
+		retHandler := NewRetrievalHandler(searchSvc, ctxBuilder)
 		r.Post("/search", retHandler.Search)
+		r.Post("/search/context", retHandler.BuildContext)
 	})
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {

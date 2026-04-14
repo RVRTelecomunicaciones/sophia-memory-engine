@@ -91,9 +91,10 @@ func main() {
 	heuristicSvc := heuristics.NewService(heurRepo, txMgr, eventPub, clock)
 	relationSvc := relations.NewService(relRepo, eventPub, clock)
 	searchSvc := retrieval.NewSearchService(searchIdx, memRepo, cfg.Retrieval, clock)
+	ctxBuilder := retrieval.NewContextBuilder(searchIdx, memRepo, decRepo, heurRepo, relRepo, cfg.Retrieval, clock)
 
 	// HTTP.
-	router := apphttp.NewRouter(memorySvc, decisionSvc, heuristicSvc, relationSvc, searchSvc)
+	router := apphttp.NewRouter(memorySvc, decisionSvc, heuristicSvc, relationSvc, searchSvc, ctxBuilder)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	server := &gohttp.Server{

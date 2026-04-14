@@ -16,16 +16,18 @@ import (
 // --- Mocks ---
 
 type mockDecisionRepo struct {
-	saved           []*decision.Decision
-	statusUpdates   []statusUpdate
-	findByIDResult  *decision.Decision
-	findByIDErr     error
+	saved             []*decision.Decision
+	statusUpdates     []statusUpdate
+	findByIDResult    *decision.Decision
+	findByIDErr       error
 	activeByKeyResult *decision.Decision
 	activeByKeyErr    error
-	findByKeyResult []decision.Decision
-	findByKeyErr    error
-	saveErr         error
-	updateStatusErr error
+	findByKeyResult   []decision.Decision
+	findByKeyErr      error
+	activeByScopeResult []decision.Decision
+	activeByScopeErr    error
+	saveErr           error
+	updateStatusErr   error
 }
 
 type statusUpdate struct {
@@ -52,6 +54,10 @@ func (m *mockDecisionRepo) FindActiveByKey(_ context.Context, _ string, _ shared
 
 func (m *mockDecisionRepo) FindByKey(_ context.Context, _ string, _ shared.Scope) ([]decision.Decision, error) {
 	return m.findByKeyResult, m.findByKeyErr
+}
+
+func (m *mockDecisionRepo) FindActiveByScope(_ context.Context, _ shared.Scope) ([]decision.Decision, error) {
+	return m.activeByScopeResult, m.activeByScopeErr
 }
 
 func (m *mockDecisionRepo) UpdateStatus(_ context.Context, id shared.RecordID, status shared.DecisionStatus, supersededBy *shared.RecordID) error {

@@ -13,5 +13,6 @@ type DecisionRepository interface {
 	FindByID(ctx context.Context, id shared.RecordID) (*decision.Decision, error)
 	FindActiveByKey(ctx context.Context, key string, scope shared.Scope) (*decision.Decision, error)
 	FindByKey(ctx context.Context, key string, scope shared.Scope) ([]decision.Decision, error)
+	FindActiveByScope(ctx context.Context, scope shared.Scope) ([]decision.Decision, error)
 	UpdateStatus(ctx context.Context, id shared.RecordID, status shared.DecisionStatus, supersededBy *shared.RecordID) error
 }
