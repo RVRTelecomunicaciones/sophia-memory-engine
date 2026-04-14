@@ -17,6 +17,7 @@ func NewRouter(
 	relationSvc inbound.RelationService,
 	searchSvc *retrieval.SearchService,
 	ctxBuilder *retrieval.ContextBuilder,
+	purgeSvc inbound.PurgeService,
 ) chi.Router {
 	r := chi.NewRouter()
 	r.Use(chiMiddleware.RequestID)
@@ -50,6 +51,10 @@ func NewRouter(
 		retHandler := NewRetrievalHandler(searchSvc, ctxBuilder)
 		r.Post("/search", retHandler.Search)
 		r.Post("/search/context", retHandler.BuildContext)
+
+		purgeHandler := NewPurgeHandler(purgeSvc)
+		r.Post("/purge/request", purgeHandler.Request)
+		r.Post("/purge/{id}/execute", purgeHandler.Execute)
 	})
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {

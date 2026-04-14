@@ -19,6 +19,7 @@ import (
 	"github.com/sophia-engine/memory-engine/internal/application/ingest"
 	"github.com/sophia-engine/memory-engine/internal/application/relations"
 	"github.com/sophia-engine/memory-engine/internal/application/retrieval"
+	"github.com/sophia-engine/memory-engine/internal/application/security"
 	"github.com/sophia-engine/memory-engine/internal/domain/shared"
 	"github.com/sophia-engine/memory-engine/internal/infrastructure/config"
 	"github.com/sophia-engine/memory-engine/internal/infrastructure/database"
@@ -92,9 +93,11 @@ func main() {
 	relationSvc := relations.NewService(relRepo, eventPub, clock)
 	searchSvc := retrieval.NewSearchService(searchIdx, memRepo, cfg.Retrieval, clock)
 	ctxBuilder := retrieval.NewContextBuilder(searchIdx, memRepo, decRepo, heurRepo, relRepo, cfg.Retrieval, clock)
+	purgeRepo := persistence.NewPurgePgRepository(pool)
+	purgeSvc := security.NewService(purgeRepo, memRepo, relRepo, searchIdx, txMgr, eventPub, clock)
 
 	// HTTP.
-	router := apphttp.NewRouter(memorySvc, decisionSvc, heuristicSvc, relationSvc, searchSvc, ctxBuilder)
+	router := apphttp.NewRouter(memorySvc, decisionSvc, heuristicSvc, relationSvc, searchSvc, ctxBuilder, purgeSvc)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	server := &gohttp.Server{
