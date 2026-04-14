@@ -1,6 +1,8 @@
 module github.com/sophia-engine/memory-engine
 
-go 1.25.0
+go 1.26
+
+toolchain go1.26.2
 
 require (
 	dario.cat/mergo v1.0.2 // indirect
