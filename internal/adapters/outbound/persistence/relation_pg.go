@@ -17,8 +17,12 @@ import (
 // Compile-time check that RelationPgRepository implements RelationRepository.
 var _ outbound.RelationRepository = (*RelationPgRepository)(nil)
 
-// maxTraverseDepth is the hard ceiling for recursive graph traversal.
-const maxTraverseDepth = 3
+const (
+	// maxTraverseDepth is the hard ceiling for recursive graph traversal.
+	maxTraverseDepth = 3
+	// maxTraverseResults is the hard ceiling for total nodes returned by traversal.
+	maxTraverseResults = 100
+)
 
 // RelationPgRepository is the PostgreSQL implementation of the RelationRepository port.
 type RelationPgRepository struct {
@@ -41,35 +45,33 @@ func (r *RelationPgRepository) Save(ctx context.Context, rel *relation.Relation)
 
 	const query = `
 		INSERT INTO relations (
-			id, source_id, target_id, type, metadata,
+			id, source_id, target_id, relation_type, metadata,
 			tenant_id, project_id, repo_id, agent_id, session_id, environment,
-			valid_from, valid_until, last_accessed, freshness,
+			valid_from, valid_until,
 			created_at, updated_at
 		) VALUES (
 			$1, $2, $3, $4, $5,
 			$6, $7, $8, $9, $10, $11,
-			$12, $13, $14, $15,
-			$16, $17
+			$12, $13,
+			$14, $15
 		)`
 
 	_, err = conn.Exec(ctx, query,
-		rel.ID.String(),                    // $1
-		rel.SourceID.String(),              // $2
-		rel.TargetID.String(),              // $3
-		string(rel.Type),                   // $4
-		metadataJSON,                       // $5
-		ptrStr(rel.Scope.TenantID),         // $6
-		rel.Scope.ProjectID,                // $7
-		ptrStr(rel.Scope.RepoID),           // $8
-		ptrStr(rel.Scope.AgentID),          // $9
-		ptrStr(rel.Scope.SessionID),        // $10
-		ptrStr(rel.Scope.Environment),      // $11
-		ptrTime(rel.Temporal.ValidFrom),    // $12
-		ptrTime(rel.Temporal.ValidUntil),   // $13
-		ptrTime(rel.Temporal.LastAccessed), // $14
-		string(rel.Temporal.Freshness),     // $15
-		rel.CreatedAt,                      // $16
-		rel.UpdatedAt,                      // $17
+		rel.ID.String(),               // $1
+		rel.SourceID.String(),         // $2
+		rel.TargetID.String(),         // $3
+		string(rel.Type),              // $4
+		metadataJSON,                  // $5
+		ptrStr(rel.Scope.TenantID),    // $6
+		rel.Scope.ProjectID,           // $7
+		ptrStr(rel.Scope.RepoID),      // $8
+		ptrStr(rel.Scope.AgentID),     // $9
+		ptrStr(rel.Scope.SessionID),   // $10
+		ptrStr(rel.Scope.Environment), // $11
+		ptrTime(rel.Temporal.ValidFrom),  // $12
+		ptrTime(rel.Temporal.ValidUntil), // $13
+		rel.CreatedAt,                 // $14
+		rel.UpdatedAt,                 // $15
 	)
 
 	return err
@@ -157,12 +159,12 @@ func (r *RelationPgRepository) FindFromSource(ctx context.Context, sourceID shar
 	conn := getConn(ctx, r.pool)
 
 	const query = `
-		SELECT id, source_id, target_id, type, metadata,
+		SELECT id, source_id, target_id, relation_type, metadata,
 		       tenant_id, project_id, repo_id, agent_id, session_id, environment,
 		       valid_from, valid_until, created_at, updated_at
 		FROM relations
 		WHERE source_id = $1
-		  AND ($2::varchar IS NULL OR type = $2)
+		  AND ($2::varchar IS NULL OR relation_type = $2)
 		ORDER BY created_at DESC`
 
 	var typeStr *string
@@ -198,12 +200,12 @@ func (r *RelationPgRepository) FindToTarget(ctx context.Context, targetID shared
 	conn := getConn(ctx, r.pool)
 
 	const query = `
-		SELECT id, source_id, target_id, type, metadata,
+		SELECT id, source_id, target_id, relation_type, metadata,
 		       tenant_id, project_id, repo_id, agent_id, session_id, environment,
 		       valid_from, valid_until, created_at, updated_at
 		FROM relations
 		WHERE target_id = $1
-		  AND ($2::varchar IS NULL OR type = $2)
+		  AND ($2::varchar IS NULL OR relation_type = $2)
 		ORDER BY created_at DESC`
 
 	var typeStr *string
@@ -235,6 +237,15 @@ func (r *RelationPgRepository) FindToTarget(ctx context.Context, targetID shared
 }
 
 // Traverse performs a recursive graph traversal from the given start node.
+//
+// Hard limits: max depth 3, max total results 100.
+// Cycle prevention: path array tracking visited node IDs.
+//
+// Note: ExcludeStatuses filtering is not done in SQL because relations are
+// cross-aggregate (targets can be in memories, decisions, or heuristics tables).
+// Purged record exclusion must be done at the application layer by checking
+// target record status after traversal. This is consistent with the spec decision
+// that referential integrity is enforced at the application layer.
 func (r *RelationPgRepository) Traverse(ctx context.Context, query outbound.TraverseQuery) ([]outbound.TraverseResult, error) {
 	conn := getConn(ctx, r.pool)
 
@@ -279,7 +290,7 @@ func (r *RelationPgRepository) Traverse(ctx context.Context, query outbound.Trav
 			args = append(args, string(t))
 			paramIdx++
 		}
-		typeFilter = fmt.Sprintf("AND r.type IN (%s)", strings.Join(placeholders, ", "))
+		typeFilter = fmt.Sprintf("AND r.relation_type IN (%s)", strings.Join(placeholders, ", "))
 	}
 
 	// Build temporal filter clause.
@@ -360,7 +371,7 @@ func (r *RelationPgRepository) Traverse(ctx context.Context, query outbound.Trav
 	sql := fmt.Sprintf(`
 WITH RECURSIVE graph AS (
     SELECT
-        r.id, r.source_id, r.target_id, r.type, r.metadata,
+        r.id, r.source_id, r.target_id, r.relation_type, r.metadata,
         r.tenant_id, r.project_id, r.repo_id, r.agent_id, r.session_id, r.environment,
         r.valid_from, r.valid_until, r.created_at, r.updated_at,
         1 AS depth,
@@ -373,7 +384,7 @@ WITH RECURSIVE graph AS (
     UNION ALL
 
     SELECT
-        r.id, r.source_id, r.target_id, r.type, r.metadata,
+        r.id, r.source_id, r.target_id, r.relation_type, r.metadata,
         r.tenant_id, r.project_id, r.repo_id, r.agent_id, r.session_id, r.environment,
         r.valid_from, r.valid_until, r.created_at, r.updated_at,
         g.depth + 1,
@@ -385,14 +396,16 @@ WITH RECURSIVE graph AS (
       AND r.project_id = %s
       %s
 )
-SELECT id, source_id, target_id, type, metadata,
+SELECT id, source_id, target_id, relation_type, metadata,
        tenant_id, project_id, repo_id, agent_id, session_id, environment,
        valid_from, valid_until, created_at, updated_at,
        depth, path
 FROM graph
-ORDER BY depth ASC, created_at DESC`,
+ORDER BY depth ASC, created_at DESC
+LIMIT %d`,
 		basePath, baseWhere, projectParam, allFilters,
 		recursivePath, recursiveJoin, depthParam, cyclePrevention, projectParam, allFilters,
+		maxTraverseResults,
 	)
 
 	rows, err := conn.Query(ctx, sql, args...)
