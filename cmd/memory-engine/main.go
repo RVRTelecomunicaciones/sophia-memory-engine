@@ -14,6 +14,8 @@ import (
 	apphttp "github.com/sophia-engine/memory-engine/internal/adapters/inbound/http"
 	"github.com/sophia-engine/memory-engine/internal/adapters/outbound/persistence"
 	"github.com/sophia-engine/memory-engine/internal/adapters/outbound/search"
+	"github.com/sophia-engine/memory-engine/internal/application/decisions"
+	"github.com/sophia-engine/memory-engine/internal/application/heuristics"
 	"github.com/sophia-engine/memory-engine/internal/application/ingest"
 	"github.com/sophia-engine/memory-engine/internal/application/retrieval"
 	"github.com/sophia-engine/memory-engine/internal/domain/shared"
@@ -74,14 +76,22 @@ func main() {
 
 	// Repositories.
 	memRepo := persistence.NewMemoryPgRepository(pool)
+	decRepo := persistence.NewDecisionPgRepository(pool)
+	heurRepo := persistence.NewHeuristicPgRepository(pool)
+	relRepo := persistence.NewRelationPgRepository(pool)
 	searchIdx := search.NewPostgresFTSIndex(pool)
+
+	// Transaction manager.
+	txMgr := persistence.NewPgTxManager(pool)
 
 	// Application services.
 	memorySvc := ingest.NewService(memRepo, searchIdx, eventPub, clock)
+	decisionSvc := decisions.NewService(decRepo, relRepo, txMgr, eventPub, clock)
+	heuristicSvc := heuristics.NewService(heurRepo, txMgr, eventPub, clock)
 	searchSvc := retrieval.NewSearchService(searchIdx, memRepo, cfg.Retrieval, clock)
 
 	// HTTP.
-	router := apphttp.NewRouter(memorySvc, searchSvc)
+	router := apphttp.NewRouter(memorySvc, decisionSvc, heuristicSvc, searchSvc)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	server := &gohttp.Server{

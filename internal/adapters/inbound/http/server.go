@@ -12,6 +12,8 @@ import (
 // NewRouter creates the HTTP router with all routes wired.
 func NewRouter(
 	memorySvc inbound.MemoryService,
+	decisionSvc inbound.DecisionService,
+	heuristicSvc inbound.HeuristicService,
 	searchSvc *retrieval.SearchService,
 ) chi.Router {
 	r := chi.NewRouter()
@@ -25,6 +27,18 @@ func NewRouter(
 		r.Post("/memories", memHandler.Ingest)
 		r.Get("/memories/{id}", memHandler.Get)
 		r.Post("/memories/{id}/archive", memHandler.Archive)
+
+		decHandler := NewDecisionHandler(decisionSvc)
+		r.Post("/decisions", decHandler.Record)
+		r.Get("/decisions/{id}", decHandler.Get)
+		r.Get("/decisions/history/{key}", decHandler.GetHistory)
+		r.Post("/decisions/{id}/contradict", decHandler.Contradict)
+
+		heurHandler := NewHeuristicHandler(heuristicSvc)
+		r.Post("/heuristics", heurHandler.Create)
+		r.Get("/heuristics/active/{key}", heurHandler.GetActive)
+		r.Get("/heuristics", heurHandler.ListByScope)
+		r.Post("/heuristics/{id}/toggle", heurHandler.Toggle)
 
 		retHandler := NewRetrievalHandler(searchSvc)
 		r.Post("/search", retHandler.Search)
