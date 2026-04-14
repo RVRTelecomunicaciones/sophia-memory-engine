@@ -18,6 +18,7 @@ func NewRouter(
 	searchSvc *retrieval.SearchService,
 	ctxBuilder *retrieval.ContextBuilder,
 	purgeSvc inbound.PurgeService,
+	feedbackSvc inbound.FeedbackService,
 ) chi.Router {
 	r := chi.NewRouter()
 	r.Use(chiMiddleware.RequestID)
@@ -55,6 +56,9 @@ func NewRouter(
 		purgeHandler := NewPurgeHandler(purgeSvc)
 		r.Post("/purge/request", purgeHandler.Request)
 		r.Post("/purge/{id}/execute", purgeHandler.Execute)
+
+		feedbackHandler := NewFeedbackHandler(feedbackSvc)
+		r.Post("/feedback", feedbackHandler.Submit)
 	})
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {

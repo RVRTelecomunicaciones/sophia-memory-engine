@@ -69,6 +69,8 @@ type ContextBudgetConfig struct {
 	TokenEstimateRatio  float64
 	MaxGraphExpandDepth int
 	MaxGraphExpandCount int
+	MaxFanoutPerNode    int // max relations kept per source node after traversal (0 = no limit)
+	MaxTotalExpanded    int // hard cap on total expanded nodes returned (0 = default 100)
 }
 
 // DefaultConfig returns the default application configuration.
@@ -118,6 +120,8 @@ func DefaultConfig() AppConfig {
 				TokenEstimateRatio:  0.25,
 				MaxGraphExpandDepth: 1,
 				MaxGraphExpandCount: 5,
+				MaxFanoutPerNode:    10,
+				MaxTotalExpanded:    50,
 			},
 		},
 	}

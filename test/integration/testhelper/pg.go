@@ -52,12 +52,20 @@ func SetupTestDB(t *testing.T) *pgxpool.Pool {
 func runMigrations(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	migPath := findMigrationPath(t)
-	sql, err := os.ReadFile(filepath.Join(migPath, "001_initial_schema.up.sql"))
-	if err != nil {
-		t.Fatalf("read migration: %v", err)
+
+	migrations := []string{
+		"001_initial_schema.up.sql",
+		"002_retrieval_feedback.up.sql",
 	}
-	if _, err := pool.Exec(context.Background(), string(sql)); err != nil {
-		t.Fatalf("run migration: %v", err)
+
+	for _, m := range migrations {
+		sql, err := os.ReadFile(filepath.Join(migPath, m))
+		if err != nil {
+			t.Fatalf("read migration %s: %v", m, err)
+		}
+		if _, err := pool.Exec(context.Background(), string(sql)); err != nil {
+			t.Fatalf("run migration %s: %v", m, err)
+		}
 	}
 }
 

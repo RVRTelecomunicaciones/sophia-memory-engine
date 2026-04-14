@@ -100,6 +100,7 @@ func (m *mockCtxHeuristicRepo) UpdateEnabled(_ context.Context, _ shared.RecordI
 type mockCtxRelationRepo struct {
 	traverseResults []outbound.TraverseResult
 	traverseErr     error
+	traverseQueries []outbound.TraverseQuery
 }
 
 func (m *mockCtxRelationRepo) Save(_ context.Context, _ *relation.Relation) error { return nil }
@@ -109,7 +110,8 @@ func (m *mockCtxRelationRepo) FindFromSource(_ context.Context, _ shared.RecordI
 func (m *mockCtxRelationRepo) FindToTarget(_ context.Context, _ shared.RecordID, _ *shared.RelationType) ([]relation.Relation, error) {
 	return nil, nil
 }
-func (m *mockCtxRelationRepo) Traverse(_ context.Context, _ outbound.TraverseQuery) ([]outbound.TraverseResult, error) {
+func (m *mockCtxRelationRepo) Traverse(_ context.Context, q outbound.TraverseQuery) ([]outbound.TraverseResult, error) {
+	m.traverseQueries = append(m.traverseQueries, q)
 	return m.traverseResults, m.traverseErr
 }
 func (m *mockCtxRelationRepo) DeleteByTarget(_ context.Context, _ shared.RecordID) (int, error) {
@@ -441,4 +443,84 @@ func TestBuildContext_EmptyScope_ReturnsEmptyBundle(t *testing.T) {
 	assert.Empty(t, bundle.Sections)
 	assert.Equal(t, 0, bundle.TotalTokens)
 	assert.False(t, bundle.Truncated)
+}
+
+func TestBuildContext_GraphExpansion_RespectsFanoutConfig(t *testing.T) {
+	clock := shared.NewFixedClock(time.Date(2026, 4, 14, 10, 0, 0, 0, time.UTC))
+	scope := ctxTestScope(t)
+
+	d1 := makeDecision(t, clock, scope, "auth/jwt", "Use JWT", "Standard")
+	decRepo := &mockCtxDecisionRepo{activeByScopeResult: []decision.Decision{d1}}
+
+	targetID := shared.NewRecordID()
+	relRepo := &mockCtxRelationRepo{
+		traverseResults: []outbound.TraverseResult{
+			{
+				Relation: relation.Relation{
+					ID:       shared.NewRecordID(),
+					SourceID: d1.ID,
+					TargetID: targetID,
+					Type:     shared.RelationTypeRelatesTo,
+					Scope:    scope,
+				},
+				Depth: 1,
+				Path:  []shared.RecordID{d1.ID, targetID},
+			},
+		},
+	}
+
+	// Use a custom config with specific fanout values.
+	cfg := ctxTestConfig()
+	cfg.ContextBudget.MaxFanoutPerNode = 5
+	cfg.ContextBudget.MaxTotalExpanded = 25
+
+	builder := retrieval.NewContextBuilder(
+		&mockSearchIndex{}, &mockMemoryRepo{}, decRepo,
+		&mockCtxHeuristicRepo{}, relRepo, cfg, clock,
+	)
+
+	bundle, err := builder.BuildContext(context.Background(), inbound.ContextRequest{
+		Scope: scope,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, bundle)
+
+	// Verify that the TraverseQuery received the fanout config values.
+	require.Len(t, relRepo.traverseQueries, 1, "expected exactly 1 traverse call")
+	tq := relRepo.traverseQueries[0]
+	assert.Equal(t, 5, tq.MaxFanoutPerNode, "MaxFanoutPerNode should come from config")
+	assert.Equal(t, 25, tq.MaxTotalResults, "MaxTotalResults should come from config")
+}
+
+func TestBuildContext_GraphExpansion_ZeroFanoutMeansNoLimit(t *testing.T) {
+	clock := shared.NewFixedClock(time.Date(2026, 4, 14, 10, 0, 0, 0, time.UTC))
+	scope := ctxTestScope(t)
+
+	d1 := makeDecision(t, clock, scope, "auth/jwt", "Use JWT", "Standard")
+	decRepo := &mockCtxDecisionRepo{activeByScopeResult: []decision.Decision{d1}}
+
+	relRepo := &mockCtxRelationRepo{}
+
+	// Explicitly set fanout to 0.
+	cfg := ctxTestConfig()
+	cfg.ContextBudget.MaxFanoutPerNode = 0
+	cfg.ContextBudget.MaxTotalExpanded = 0
+
+	builder := retrieval.NewContextBuilder(
+		&mockSearchIndex{}, &mockMemoryRepo{}, decRepo,
+		&mockCtxHeuristicRepo{}, relRepo, cfg, clock,
+	)
+
+	_, err := builder.BuildContext(context.Background(), inbound.ContextRequest{
+		Scope: scope,
+	})
+
+	require.NoError(t, err)
+
+	// Verify that zero values are passed through (repo layer handles defaults).
+	require.Len(t, relRepo.traverseQueries, 1)
+	tq := relRepo.traverseQueries[0]
+	assert.Equal(t, 0, tq.MaxFanoutPerNode, "zero means no limit")
+	assert.Equal(t, 0, tq.MaxTotalResults, "zero means use default")
 }

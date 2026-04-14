@@ -425,9 +425,11 @@ func (b *ContextBuilder) expandGraph(ctx context.Context, startIDs []shared.Reco
 		}
 
 		tq := outbound.TraverseQuery{
-			StartID:   startID,
-			Direction: outbound.TraverseOutbound,
-			MaxDepth:  b.config.ContextBudget.MaxGraphExpandDepth,
+			StartID:          startID,
+			Direction:        outbound.TraverseOutbound,
+			MaxDepth:         b.config.ContextBudget.MaxGraphExpandDepth,
+			MaxFanoutPerNode: b.config.ContextBudget.MaxFanoutPerNode,
+			MaxTotalResults:  b.config.ContextBudget.MaxTotalExpanded,
 		}
 
 		results, err := b.relRepo.Traverse(ctx, tq)

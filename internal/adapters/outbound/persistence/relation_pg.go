@@ -20,8 +20,10 @@ var _ outbound.RelationRepository = (*RelationPgRepository)(nil)
 const (
 	// maxTraverseDepth is the hard ceiling for recursive graph traversal.
 	maxTraverseDepth = 3
-	// maxTraverseResults is the hard ceiling for total nodes returned by traversal.
+	// maxTraverseResults is the default hard ceiling for total nodes returned by traversal.
 	maxTraverseResults = 100
+	// defaultFanout means no fanout limit per node.
+	defaultFanout = 0
 )
 
 // RelationPgRepository is the PostgreSQL implementation of the RelationRepository port.
@@ -340,6 +342,18 @@ func (r *RelationPgRepository) Traverse(ctx context.Context, query outbound.Trav
 		}
 	}
 
+	// Resolve total results limit.
+	totalLimit := maxTraverseResults
+	if query.MaxTotalResults > 0 {
+		totalLimit = query.MaxTotalResults
+	}
+
+	// Resolve fanout per node.
+	fanout := defaultFanout
+	if query.MaxFanoutPerNode > 0 {
+		fanout = query.MaxFanoutPerNode
+	}
+
 	allFilters := typeFilter + " " + temporalFilter + " " + scopeFilters
 
 	// Build the base case and recursive case depending on direction.
@@ -366,6 +380,47 @@ func (r *RelationPgRepository) Traverse(ctx context.Context, query outbound.Trav
 		basePath = "ARRAY[r.source_id, r.target_id]::varchar[]"
 		recursivePath = "g.path || r.target_id"
 		cyclePrevention = "AND NOT r.target_id = ANY(g.path)"
+	}
+
+	// Build final SELECT: optionally wrap with a ranked CTE to enforce fanout per node.
+	var finalSelect string
+	if fanout > 0 {
+		fanoutParam := fmt.Sprintf("$%d", paramIdx)
+		args = append(args, fanout)
+		paramIdx++
+
+		finalSelect = fmt.Sprintf(`
+ranked AS (
+    SELECT *,
+        ROW_NUMBER() OVER (PARTITION BY source_id ORDER BY depth ASC, created_at DESC) AS rn
+    FROM graph
+)
+SELECT id, source_id, target_id, relation_type, metadata,
+       tenant_id, project_id, repo_id, agent_id, session_id, environment,
+       valid_from, valid_until, created_at, updated_at,
+       depth, path
+FROM ranked
+WHERE rn <= %s
+ORDER BY depth ASC, created_at DESC
+LIMIT %d`, fanoutParam, totalLimit)
+	} else {
+		finalSelect = fmt.Sprintf(`
+SELECT id, source_id, target_id, relation_type, metadata,
+       tenant_id, project_id, repo_id, agent_id, session_id, environment,
+       valid_from, valid_until, created_at, updated_at,
+       depth, path
+FROM graph
+ORDER BY depth ASC, created_at DESC
+LIMIT %d`, totalLimit)
+	}
+
+	// When fanout is used, the final SELECT references a second CTE ("ranked"),
+	// so the graph CTE must end with a comma instead of closing the WITH block.
+	var cteSuffix string
+	if fanout > 0 {
+		cteSuffix = "),"
+	} else {
+		cteSuffix = ")"
 	}
 
 	sql := fmt.Sprintf(`
@@ -395,17 +450,11 @@ WITH RECURSIVE graph AS (
       %s
       AND r.project_id = %s
       %s
-)
-SELECT id, source_id, target_id, relation_type, metadata,
-       tenant_id, project_id, repo_id, agent_id, session_id, environment,
-       valid_from, valid_until, created_at, updated_at,
-       depth, path
-FROM graph
-ORDER BY depth ASC, created_at DESC
-LIMIT %d`,
+%s
+%s`,
 		basePath, baseWhere, projectParam, allFilters,
 		recursivePath, recursiveJoin, depthParam, cyclePrevention, projectParam, allFilters,
-		maxTraverseResults,
+		cteSuffix, finalSelect,
 	)
 
 	rows, err := conn.Query(ctx, sql, args...)

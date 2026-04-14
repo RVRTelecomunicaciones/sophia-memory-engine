@@ -206,6 +206,10 @@ const (
 	EventTypePurgeRequested       EventType = "purge.requested"
 	EventTypePurgeExecuted        EventType = "purge.executed"
 	EventTypeProfileGenerated     EventType = "profile.generated"
+	EventTypeMemoryHelpful        EventType = "memory.helpful"
+	EventTypeMemoryIrrelevant     EventType = "memory.irrelevant"
+	EventTypeContextHelpful       EventType = "context.helpful"
+	EventTypeContextIrrelevant    EventType = "context.irrelevant"
 )
 
 // IsValid returns true if the EventType is a known value.
@@ -216,7 +220,9 @@ func (e EventType) IsValid() bool {
 		EventTypeHeuristicCreated, EventTypeHeuristicToggled,
 		EventTypeRelationCreated,
 		EventTypePurgeRequested, EventTypePurgeExecuted,
-		EventTypeProfileGenerated:
+		EventTypeProfileGenerated,
+		EventTypeMemoryHelpful, EventTypeMemoryIrrelevant,
+		EventTypeContextHelpful, EventTypeContextIrrelevant:
 		return true
 	}
 	return false

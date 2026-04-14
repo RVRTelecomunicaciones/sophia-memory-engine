@@ -19,13 +19,15 @@ const (
 
 // TraverseQuery defines the parameters for a graph traversal from a starting node.
 type TraverseQuery struct {
-	StartID         shared.RecordID
-	Direction       TraverseDirection
-	MaxDepth        int
-	Types           []shared.RelationType
-	Scope           *shared.Scope
-	ValidAt         *time.Time
-	ExcludeStatuses []string
+	StartID          shared.RecordID
+	Direction        TraverseDirection
+	MaxDepth         int
+	MaxFanoutPerNode int // max relations per source node in results (0 = no limit)
+	MaxTotalResults  int // hard cap on total results returned (0 = default 100)
+	Types            []shared.RelationType
+	Scope            *shared.Scope
+	ValidAt          *time.Time
+	ExcludeStatuses  []string
 }
 
 // TraverseResult represents a single relation found during traversal, with depth and path info.

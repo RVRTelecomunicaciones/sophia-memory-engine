@@ -15,6 +15,7 @@ import (
 	"github.com/sophia-engine/memory-engine/internal/adapters/outbound/persistence"
 	"github.com/sophia-engine/memory-engine/internal/adapters/outbound/search"
 	"github.com/sophia-engine/memory-engine/internal/application/decisions"
+	"github.com/sophia-engine/memory-engine/internal/application/feedback"
 	"github.com/sophia-engine/memory-engine/internal/application/heuristics"
 	"github.com/sophia-engine/memory-engine/internal/application/ingest"
 	"github.com/sophia-engine/memory-engine/internal/application/relations"
@@ -95,9 +96,11 @@ func main() {
 	ctxBuilder := retrieval.NewContextBuilder(searchIdx, memRepo, decRepo, heurRepo, relRepo, cfg.Retrieval, clock)
 	purgeRepo := persistence.NewPurgePgRepository(pool)
 	purgeSvc := security.NewService(purgeRepo, memRepo, relRepo, searchIdx, txMgr, eventPub, clock)
+	feedbackRepo := persistence.NewFeedbackPgRepository(pool)
+	feedbackSvc := feedback.NewService(feedbackRepo, eventPub, clock)
 
 	// HTTP.
-	router := apphttp.NewRouter(memorySvc, decisionSvc, heuristicSvc, relationSvc, searchSvc, ctxBuilder, purgeSvc)
+	router := apphttp.NewRouter(memorySvc, decisionSvc, heuristicSvc, relationSvc, searchSvc, ctxBuilder, purgeSvc, feedbackSvc)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	server := &gohttp.Server{
