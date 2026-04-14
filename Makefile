@@ -1,4 +1,4 @@
-.PHONY: test test-unit test-integration lint
+.PHONY: test test-unit test-integration lint modernize
 
 test:
 	go test ./...
@@ -11,3 +11,6 @@ test-integration:
 
 lint:
 	golangci-lint run ./...
+
+modernize:
+	go fix ./...

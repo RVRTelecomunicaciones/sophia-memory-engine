@@ -33,35 +33,42 @@ type DatabaseConfig struct {
 
 // RetrievalConfig holds retrieval subsystem settings.
 type RetrievalConfig struct {
-	Ranking       RankingWeights
+	Weights       RankingWeights
 	Thresholds    RetrievalThresholds
 	ContextBudget ContextBudgetConfig
 }
 
-// RankingWeights defines weights for hybrid retrieval scoring.
+// RankingWeights defines the 7 signals for hybrid retrieval scoring.
+// Weights must sum to 1.0.
 type RankingWeights struct {
-	Recency    float64
-	Relevance  float64
-	Importance float64
-	Freshness  float64
+	FTS            float64
+	Trigram        float64
+	Recency        float64
+	Importance     float64
+	TypeBoost      float64
+	Freshness      float64
+	ScopeExactness float64
 }
 
-// RetrievalThresholds defines minimum scores for retrieval results.
+// RetrievalThresholds defines minimum scores and limits for retrieval.
 type RetrievalThresholds struct {
-	MinRelevanceScore float64
-	MinFinalScore     float64
-	MaxResults        int
+	MinTrigramSimilarity float64
+	MinFinalScore        float64
+	MaxResults           int
+	DefaultResults       int
 }
 
-// ContextBudgetConfig defines limits for context building.
+// ContextBudgetConfig defines token budget allocation for context building.
 type ContextBudgetConfig struct {
-	MaxTokens          int
-	MaxMemories        int
-	MaxDecisions       int
-	MaxHeuristics      int
-	MaxRelationDepth   int
-	IncludeEvidence    bool
-	IncludeProvenance  bool
+	DefaultMaxTokens    int
+	DecisionsPct        float64
+	HeuristicsPct       float64
+	RecentEpisodicPct   float64
+	SemanticPct         float64
+	RelatedPct          float64
+	TokenEstimateRatio  float64
+	MaxGraphExpandDepth int
+	MaxGraphExpandCount int
 }
 
 // DefaultConfig returns the default application configuration.
@@ -86,25 +93,31 @@ func DefaultConfig() AppConfig {
 			ConnMaxIdleTime: 1 * time.Minute,
 		},
 		Retrieval: RetrievalConfig{
-			Ranking: RankingWeights{
-				Recency:    0.25,
-				Relevance:  0.35,
-				Importance: 0.25,
-				Freshness:  0.15,
+			Weights: RankingWeights{
+				FTS:            0.25,
+				Trigram:        0.15,
+				Recency:        0.12,
+				Importance:     0.13,
+				TypeBoost:      0.10,
+				Freshness:      0.10,
+				ScopeExactness: 0.15,
 			},
 			Thresholds: RetrievalThresholds{
-				MinRelevanceScore: 0.3,
-				MinFinalScore:     0.4,
-				MaxResults:        50,
+				MinTrigramSimilarity: 0.3,
+				MinFinalScore:        0.1,
+				MaxResults:           100,
+				DefaultResults:       20,
 			},
 			ContextBudget: ContextBudgetConfig{
-				MaxTokens:         4000,
-				MaxMemories:       20,
-				MaxDecisions:      10,
-				MaxHeuristics:     10,
-				MaxRelationDepth:  3,
-				IncludeEvidence:   true,
-				IncludeProvenance: true,
+				DefaultMaxTokens:    4000,
+				DecisionsPct:        0.25,
+				HeuristicsPct:       0.20,
+				RecentEpisodicPct:   0.30,
+				SemanticPct:         0.15,
+				RelatedPct:          0.10,
+				TokenEstimateRatio:  0.25,
+				MaxGraphExpandDepth: 1,
+				MaxGraphExpandCount: 5,
 			},
 		},
 	}
