@@ -35,9 +35,23 @@ type ArchiveMemoryCmd struct {
 	RequestedBy string
 }
 
+// GetByTopicKeyQuery looks up the latest active memory record matching a
+// topic key within a scope. ProjectID and TopicKey are required; the remaining
+// scope fields are optional refinements that, when set, must match exactly.
+type GetByTopicKeyQuery struct {
+	TopicKey    string
+	ProjectID   string
+	TenantID    *string
+	RepoID      *string
+	AgentID     *string
+	SessionID   *string
+	Environment *string
+}
+
 // MemoryService defines the inbound port for memory lifecycle operations.
 type MemoryService interface {
 	Ingest(ctx context.Context, cmd IngestMemoryCmd) (*IngestMemoryResult, error)
 	Get(ctx context.Context, id shared.RecordID) (*memory.MemoryRecord, error)
+	GetByTopicKey(ctx context.Context, query GetByTopicKeyQuery) (*memory.MemoryRecord, error)
 	Archive(ctx context.Context, cmd ArchiveMemoryCmd) error
 }

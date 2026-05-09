@@ -29,6 +29,7 @@ func NewRouter(
 	r.Route("/api/v1", func(r chi.Router) {
 		memHandler := NewMemoryHandler(memorySvc)
 		r.Post("/memories", memHandler.Ingest)
+		r.Get("/memories/by-topic-key", memHandler.GetByTopicKey)
 		r.Get("/memories/{id}", memHandler.Get)
 		r.Post("/memories/{id}/archive", memHandler.Archive)
 

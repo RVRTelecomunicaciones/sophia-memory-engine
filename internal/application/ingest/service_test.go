@@ -23,8 +23,11 @@ import (
 type mockMemoryRepo struct {
 	saveFunc         func(ctx context.Context, record *memory.MemoryRecord) error
 	findByIDFunc     func(ctx context.Context, id shared.RecordID) (*memory.MemoryRecord, error)
+	findByTopicFunc  func(ctx context.Context, scope shared.Scope, topicKey string) (*memory.MemoryRecord, error)
 	updateStatusFunc func(ctx context.Context, id shared.RecordID, status shared.MemoryStatus) error
 	saved            []*memory.MemoryRecord
+	lastTopicKey     string
+	lastScope        shared.Scope
 }
 
 func (m *mockMemoryRepo) Save(ctx context.Context, record *memory.MemoryRecord) error {
@@ -38,6 +41,15 @@ func (m *mockMemoryRepo) Save(ctx context.Context, record *memory.MemoryRecord) 
 func (m *mockMemoryRepo) FindByID(ctx context.Context, id shared.RecordID) (*memory.MemoryRecord, error) {
 	if m.findByIDFunc != nil {
 		return m.findByIDFunc(ctx, id)
+	}
+	return nil, shared.ErrNotFound
+}
+
+func (m *mockMemoryRepo) FindLatestActiveByTopicKey(ctx context.Context, scope shared.Scope, topicKey string) (*memory.MemoryRecord, error) {
+	m.lastScope = scope
+	m.lastTopicKey = topicKey
+	if m.findByTopicFunc != nil {
+		return m.findByTopicFunc(ctx, scope, topicKey)
 	}
 	return nil, shared.ErrNotFound
 }
@@ -335,5 +347,111 @@ func TestIngestService_Archive_NotFound(t *testing.T) {
 	err := svc.Archive(context.Background(), cmd)
 
 	require.Error(t, err)
+	assert.True(t, errors.Is(err, shared.ErrNotFound))
+}
+
+// ---------------------------------------------------------------------------
+// Tests: GetByTopicKey
+// ---------------------------------------------------------------------------
+
+func TestIngestService_GetByTopicKey_Success(t *testing.T) {
+	svc, repo, _ := newTestService()
+
+	topicKey := "sdd/example/tasks"
+	clock := newFixedClock()
+	record, err := memory.NewMemoryRecord(
+		shared.MemoryTypeSemantic,
+		"task list payload",
+		validScope(t),
+		validProvenance(t),
+		clock,
+		memory.WithTopicKey(topicKey),
+	)
+	require.NoError(t, err)
+
+	repo.findByTopicFunc = func(_ context.Context, _ shared.Scope, key string) (*memory.MemoryRecord, error) {
+		if key == topicKey {
+			return record, nil
+		}
+		return nil, shared.ErrNotFound
+	}
+
+	got, err := svc.GetByTopicKey(context.Background(), inbound.GetByTopicKeyQuery{
+		ProjectID: "test-project",
+		TopicKey:  topicKey,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, record.ID, got.ID)
+	assert.Equal(t, topicKey, repo.lastTopicKey)
+	assert.Equal(t, "test-project", repo.lastScope.ProjectID)
+}
+
+func TestIngestService_GetByTopicKey_PropagatesScopeFilters(t *testing.T) {
+	svc, repo, _ := newTestService()
+
+	repoID := "repo-x"
+	agentID := "agent-y"
+	envID := "production"
+
+	repo.findByTopicFunc = func(_ context.Context, _ shared.Scope, _ string) (*memory.MemoryRecord, error) {
+		return nil, shared.ErrNotFound
+	}
+
+	_, err := svc.GetByTopicKey(context.Background(), inbound.GetByTopicKeyQuery{
+		ProjectID:   "test-project",
+		TopicKey:    "sdd/example/tasks",
+		RepoID:      &repoID,
+		AgentID:     &agentID,
+		Environment: &envID,
+	})
+
+	require.Error(t, err)
+	require.NotNil(t, repo.lastScope.RepoID)
+	assert.Equal(t, repoID, *repo.lastScope.RepoID)
+	require.NotNil(t, repo.lastScope.AgentID)
+	assert.Equal(t, agentID, *repo.lastScope.AgentID)
+	require.NotNil(t, repo.lastScope.Environment)
+	assert.Equal(t, envID, *repo.lastScope.Environment)
+}
+
+func TestIngestService_GetByTopicKey_MissingProjectID(t *testing.T) {
+	svc, _, _ := newTestService()
+
+	got, err := svc.GetByTopicKey(context.Background(), inbound.GetByTopicKeyQuery{
+		TopicKey: "sdd/example/tasks",
+	})
+
+	require.Error(t, err)
+	assert.Nil(t, got)
+	assert.True(t, errors.Is(err, shared.ErrValidation))
+}
+
+func TestIngestService_GetByTopicKey_MissingTopicKey(t *testing.T) {
+	svc, _, _ := newTestService()
+
+	got, err := svc.GetByTopicKey(context.Background(), inbound.GetByTopicKeyQuery{
+		ProjectID: "test-project",
+	})
+
+	require.Error(t, err)
+	assert.Nil(t, got)
+	assert.True(t, errors.Is(err, shared.ErrValidation))
+}
+
+func TestIngestService_GetByTopicKey_NotFound(t *testing.T) {
+	svc, repo, _ := newTestService()
+	repo.findByTopicFunc = func(_ context.Context, _ shared.Scope, _ string) (*memory.MemoryRecord, error) {
+		return nil, shared.ErrNotFound
+	}
+
+	got, err := svc.GetByTopicKey(context.Background(), inbound.GetByTopicKeyQuery{
+		ProjectID: "test-project",
+		TopicKey:  "missing",
+	})
+
+	require.Error(t, err)
+	assert.Nil(t, got)
 	assert.True(t, errors.Is(err, shared.ErrNotFound))
 }
