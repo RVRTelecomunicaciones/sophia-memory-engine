@@ -28,3 +28,6 @@ coverage.html
 # Binary
 /bin/
 /dist/
+
+# Compiled migrate binary (source lives in cmd/migrate/)
+/migrate
