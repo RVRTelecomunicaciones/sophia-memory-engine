@@ -56,6 +56,7 @@ func runMigrations(t *testing.T, pool *pgxpool.Pool) {
 	migrations := []string{
 		"001_initial_schema.up.sql",
 		"002_retrieval_feedback.up.sql",
+		"003_create_api_keys.up.sql",
 	}
 
 	for _, m := range migrations {
