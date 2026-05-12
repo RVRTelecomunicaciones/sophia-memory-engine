@@ -92,12 +92,20 @@ func (r *MemoryPgRepository) Save(ctx context.Context, record *memory.MemoryReco
 	return err
 }
 
-// FindByID retrieves a MemoryRecord by its ID.
-// Returns shared.ErrNotFound if the record does not exist.
+// FindByID retrieves a MemoryRecord by its ID within the given scope.
+// Returns shared.ErrNotFound if the record does not exist OR belongs to a
+// different project — the two cases are intentionally indistinguishable to
+// prevent existence leaks across project boundaries (see ADR-0005 §P1.5).
 // Returns shared.ErrPurged if the record has been purged.
-func (r *MemoryPgRepository) FindByID(ctx context.Context, id shared.RecordID) (*memory.MemoryRecord, error) {
+//
+// Scope: scope is provided by the application layer from the auth context.
+// The record's scope is NOT used here; only the project_id and tenant_id from
+// the auth context are used as row filters.
+func (r *MemoryPgRepository) FindByID(ctx context.Context, scope shared.Scope, id shared.RecordID) (*memory.MemoryRecord, error) {
 	conn := getConn(ctx, r.pool)
 
+	// Tenant predicate: NULL tenant on the row is visible to any key in the project
+	// (legacy / cross-tenant rows). A non-NULL tenant must match exactly.
 	const query = `
 		SELECT
 			id, type, content, summary, tags, topic_key, fts_language,
@@ -108,9 +116,11 @@ func (r *MemoryPgRepository) FindByID(ctx context.Context, id shared.RecordID) (
 			status, archived_by, archive_reason,
 			created_at, updated_at
 		FROM memories
-		WHERE id = $1`
+		WHERE id = $1
+		  AND project_id = $2
+		  AND (tenant_id IS NULL OR tenant_id = $3)`
 
-	row := conn.QueryRow(ctx, query, id.String())
+	row := conn.QueryRow(ctx, query, id.String(), scope.ProjectID, scope.TenantID)
 
 	var (
 		idStr        string
@@ -228,14 +238,21 @@ func (r *MemoryPgRepository) FindByID(ctx context.Context, id shared.RecordID) (
 	return rec, nil
 }
 
-// UpdateStatus changes the status of a memory record.
-// Returns shared.ErrNotFound if the record does not exist.
-func (r *MemoryPgRepository) UpdateStatus(ctx context.Context, id shared.RecordID, status shared.MemoryStatus) error {
+// UpdateStatus changes the status of a scoped memory record.
+// Returns shared.ErrNotFound if the record does not exist within scope
+// (including cross-project access — the two cases are indistinguishable).
+//
+// Scope: scope is provided by the application layer from the auth context.
+func (r *MemoryPgRepository) UpdateStatus(ctx context.Context, scope shared.Scope, id shared.RecordID, status shared.MemoryStatus) error {
 	conn := getConn(ctx, r.pool)
 
-	const query = `UPDATE memories SET status = $1, updated_at = NOW() WHERE id = $2`
+	const query = `
+		UPDATE memories SET status = $1, updated_at = NOW()
+		WHERE id = $2
+		  AND project_id = $3
+		  AND (tenant_id IS NULL OR tenant_id = $4)`
 
-	tag, err := conn.Exec(ctx, query, string(status), id.String())
+	tag, err := conn.Exec(ctx, query, string(status), id.String(), scope.ProjectID, scope.TenantID)
 	if err != nil {
 		return err
 	}
@@ -247,9 +264,17 @@ func (r *MemoryPgRepository) UpdateStatus(ctx context.Context, id shared.RecordI
 	return nil
 }
 
-// WipeContent performs a hard purge on a memory record, clearing sensitive data.
-// Returns shared.ErrNotFound if the record does not exist.
-func (r *MemoryPgRepository) WipeContent(ctx context.Context, id shared.RecordID) error {
+// WipeContent performs a hard purge on a scoped memory record, clearing sensitive data.
+// Returns shared.ErrNotFound if the record does not exist within scope
+// (including cross-project access — the two cases are indistinguishable).
+//
+// Scope: scope is provided by the application layer from the auth context.
+// Scope: scope is provided by the application layer from the auth context.
+// NOTE: scope comes from the purge record's scope (set when the purge was
+// requested), which in turn was validated against the auth context at request
+// time. This preserves the audit chain: the purge record's scope is the
+// authoritative boundary for the wipe operation.
+func (r *MemoryPgRepository) WipeContent(ctx context.Context, scope shared.Scope, id shared.RecordID) error {
 	conn := getConn(ctx, r.pool)
 
 	const query = `
@@ -258,9 +283,11 @@ func (r *MemoryPgRepository) WipeContent(ctx context.Context, id shared.RecordID
 			search_vector = NULL, importance_score = 0,
 			importance_factors = NULL, status = 'purged',
 			updated_at = NOW()
-		WHERE id = $1`
+		WHERE id = $1
+		  AND project_id = $2
+		  AND (tenant_id IS NULL OR tenant_id = $3)`
 
-	tag, err := conn.Exec(ctx, query, id.String())
+	tag, err := conn.Exec(ctx, query, id.String(), scope.ProjectID, scope.TenantID)
 	if err != nil {
 		return err
 	}

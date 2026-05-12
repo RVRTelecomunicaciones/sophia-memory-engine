@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/sophia-engine/memory-engine/internal/domain/auth"
 	"github.com/sophia-engine/memory-engine/internal/domain/heuristic"
 	"github.com/sophia-engine/memory-engine/internal/domain/shared"
 	"github.com/sophia-engine/memory-engine/internal/ports/inbound"
@@ -36,8 +37,45 @@ func NewService(
 	}
 }
 
+// scopeFromCtx derives the auth-derived scope from the request context.
+func scopeFromCtx(ctx context.Context) shared.Scope {
+	ac, ok := auth.FromContext(ctx)
+	if !ok {
+		return shared.Scope{}
+	}
+	s := shared.Scope{ProjectID: ac.ProjectID}
+	if ac.TenantID != "" {
+		s.TenantID = &ac.TenantID
+	}
+	return s
+}
+
+// assertScopeMatch returns ErrScopeForbidden when the request scope does not
+// match the authenticated scope.
+func assertScopeMatch(authS shared.Scope, requestS shared.Scope) error {
+	if authS.ProjectID != requestS.ProjectID {
+		return shared.ErrScopeForbidden
+	}
+	if authS.TenantID != nil {
+		if requestS.TenantID == nil || *authS.TenantID != *requestS.TenantID {
+			return shared.ErrScopeForbidden
+		}
+	}
+	return nil
+}
+
 // Create creates a new heuristic rule, optionally disabling the previous active version.
+//
+// Scope assertion: when an auth context is present, the request's scope MUST
+// match the authenticated (project_id, tenant_id).
 func (s *Service) Create(ctx context.Context, cmd inbound.CreateHeuristicCmd) (*inbound.CreateHeuristicResult, error) {
+	authS := scopeFromCtx(ctx)
+	if authS.ProjectID != "" {
+		if err := assertScopeMatch(authS, cmd.Scope); err != nil {
+			return nil, err
+		}
+	}
+
 	// Determine enabled: if cmd.Enabled != nil use it, else true.
 	enabled := true
 	if cmd.Enabled != nil {
@@ -82,7 +120,7 @@ func (s *Service) Create(ctx context.Context, cmd inbound.CreateHeuristicCmd) (*
 	if existing != nil && enabled {
 		disabledPrevious = &existing.ID
 		err = s.txMgr.WithTx(ctx, func(txCtx context.Context) error {
-			if err := s.heurRepo.UpdateEnabled(txCtx, existing.ID, false); err != nil {
+			if err := s.heurRepo.UpdateEnabled(txCtx, authS, existing.ID, false); err != nil {
 				return err
 			}
 			return s.heurRepo.Save(txCtx, rule)
@@ -127,10 +165,15 @@ func (s *Service) ListByScope(ctx context.Context, query inbound.ListHeuristicsQ
 
 // Toggle enables or disables a heuristic rule.
 // When enabling, it checks for conflicts with an existing active rule for the same key+scope.
+//
+// Scope: the FindByID and UpdateEnabled calls use the auth-derived scope so
+// cross-project toggles return ErrNotFound at the fetch step.
 func (s *Service) Toggle(ctx context.Context, cmd inbound.ToggleHeuristicCmd) error {
+	authS := scopeFromCtx(ctx)
+
 	if cmd.Enabled {
-		// Find the heuristic by ID to get its key+scope.
-		rule, err := s.heurRepo.FindByID(ctx, cmd.ID)
+		// Find the heuristic by ID (scoped to auth) to get its key+scope.
+		rule, err := s.heurRepo.FindByID(ctx, authS, cmd.ID)
 		if err != nil {
 			return err
 		}
@@ -147,7 +190,7 @@ func (s *Service) Toggle(ctx context.Context, cmd inbound.ToggleHeuristicCmd) er
 		}
 	}
 
-	if err := s.heurRepo.UpdateEnabled(ctx, cmd.ID, cmd.Enabled); err != nil {
+	if err := s.heurRepo.UpdateEnabled(ctx, authS, cmd.ID, cmd.Enabled); err != nil {
 		return err
 	}
 

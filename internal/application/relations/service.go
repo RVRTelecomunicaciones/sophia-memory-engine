@@ -3,6 +3,7 @@ package relations
 import (
 	"context"
 
+	"github.com/sophia-engine/memory-engine/internal/domain/auth"
 	"github.com/sophia-engine/memory-engine/internal/domain/relation"
 	"github.com/sophia-engine/memory-engine/internal/domain/shared"
 	"github.com/sophia-engine/memory-engine/internal/ports/inbound"
@@ -31,8 +32,45 @@ func NewService(
 	}
 }
 
+// scopeFromCtx derives the auth-derived scope from the request context.
+func scopeFromCtx(ctx context.Context) shared.Scope {
+	ac, ok := auth.FromContext(ctx)
+	if !ok {
+		return shared.Scope{}
+	}
+	s := shared.Scope{ProjectID: ac.ProjectID}
+	if ac.TenantID != "" {
+		s.TenantID = &ac.TenantID
+	}
+	return s
+}
+
+// assertScopeMatch returns ErrScopeForbidden when the request scope does not
+// match the authenticated scope.
+func assertScopeMatch(authS shared.Scope, requestS shared.Scope) error {
+	if authS.ProjectID != requestS.ProjectID {
+		return shared.ErrScopeForbidden
+	}
+	if authS.TenantID != nil {
+		if requestS.TenantID == nil || *authS.TenantID != *requestS.TenantID {
+			return shared.ErrScopeForbidden
+		}
+	}
+	return nil
+}
+
 // Create validates and persists a new relation, then publishes a domain event.
+//
+// Scope assertion: when an auth context is present, the request's scope MUST
+// match the authenticated (project_id, tenant_id).
 func (s *Service) Create(ctx context.Context, cmd inbound.CreateRelationCmd) (*inbound.CreateRelationResult, error) {
+	authS := scopeFromCtx(ctx)
+	if authS.ProjectID != "" {
+		if err := assertScopeMatch(authS, cmd.Scope); err != nil {
+			return nil, err
+		}
+	}
+
 	var opts []func(*relation.Relation)
 
 	if cmd.Metadata != nil {
@@ -85,6 +123,8 @@ func (s *Service) GetTo(ctx context.Context, query inbound.RelationQuery) ([]inb
 }
 
 // traverse builds a TraverseQuery and delegates to the repository, then converts results.
+// The auth-derived scope is merged into the TraverseQuery.Scope so the SQL CTE enforces
+// project isolation at the persistence layer.
 func (s *Service) traverse(ctx context.Context, query inbound.RelationQuery, direction outbound.TraverseDirection) ([]inbound.RelationResult, error) {
 	maxDepth := 1
 	if query.MaxDepth != nil {
@@ -97,11 +137,24 @@ func (s *Service) traverse(ctx context.Context, query inbound.RelationQuery, dir
 		maxDepth = 1
 	}
 
+	// Use the auth scope as the traversal scope when available.
+	// query.Scope carries optional sub-filters (repo, agent, etc.) from the handler;
+	// we override its ProjectID and TenantID with the auth-authoritative values.
+	authS := scopeFromCtx(ctx)
+	traversalScope := query.Scope
+	if authS.ProjectID != "" {
+		if traversalScope == nil {
+			traversalScope = &shared.Scope{}
+		}
+		traversalScope.ProjectID = authS.ProjectID
+		traversalScope.TenantID = authS.TenantID
+	}
+
 	tq := outbound.TraverseQuery{
 		StartID:   query.RecordID,
 		Direction: direction,
 		MaxDepth:  maxDepth,
-		Scope:     query.Scope,
+		Scope:     traversalScope,
 		ValidAt:   query.ValidAt,
 	}
 

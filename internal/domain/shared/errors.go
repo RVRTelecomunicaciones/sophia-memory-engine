@@ -22,6 +22,10 @@ var (
 	ErrParentNotFound    = errors.New("parent not found")
 	ErrEvidenceRefNotFound = errors.New("evidence reference not found")
 	ErrAlreadyExecuted   = errors.New("already executed")
+	// ErrScopeForbidden is returned when a request's scope does not match the
+	// authenticated scope. Maps to HTTP 403. The response body must never echo
+	// which field mismatched — doing so leaks information.
+	ErrScopeForbidden    = errors.New("forbidden")
 )
 
 // FieldError describes a validation failure for a specific field.

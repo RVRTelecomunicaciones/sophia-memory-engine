@@ -32,11 +32,11 @@ func (m *mockRelationRepo) Save(_ context.Context, rel *relation.Relation) error
 	return nil
 }
 
-func (m *mockRelationRepo) FindFromSource(_ context.Context, _ shared.RecordID, _ *shared.RelationType) ([]relation.Relation, error) {
+func (m *mockRelationRepo) FindFromSource(_ context.Context, _ shared.Scope, _ shared.RecordID, _ *shared.RelationType) ([]relation.Relation, error) {
 	return nil, nil
 }
 
-func (m *mockRelationRepo) FindToTarget(_ context.Context, _ shared.RecordID, _ *shared.RelationType) ([]relation.Relation, error) {
+func (m *mockRelationRepo) FindToTarget(_ context.Context, _ shared.Scope, _ shared.RecordID, _ *shared.RelationType) ([]relation.Relation, error) {
 	return nil, nil
 }
 
@@ -45,7 +45,7 @@ func (m *mockRelationRepo) Traverse(_ context.Context, q outbound.TraverseQuery)
 	return m.traverseRes, m.traverseErr
 }
 
-func (m *mockRelationRepo) DeleteByTarget(_ context.Context, _ shared.RecordID) (int, error) {
+func (m *mockRelationRepo) DeleteByTarget(_ context.Context, _ shared.Scope, _ shared.RecordID) (int, error) {
 	return m.deleteCount, m.deleteErr
 }
 

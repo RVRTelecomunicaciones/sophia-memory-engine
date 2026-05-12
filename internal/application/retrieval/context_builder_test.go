@@ -46,13 +46,15 @@ type mockMemoryRepo struct {
 }
 
 func (m *mockMemoryRepo) Save(_ context.Context, _ *memory.MemoryRecord) error { return nil }
-func (m *mockMemoryRepo) FindByID(_ context.Context, _ shared.RecordID) (*memory.MemoryRecord, error) {
+func (m *mockMemoryRepo) FindByID(_ context.Context, _ shared.Scope, _ shared.RecordID) (*memory.MemoryRecord, error) {
 	return m.findResult, m.findErr
 }
-func (m *mockMemoryRepo) UpdateStatus(_ context.Context, _ shared.RecordID, _ shared.MemoryStatus) error {
+func (m *mockMemoryRepo) UpdateStatus(_ context.Context, _ shared.Scope, _ shared.RecordID, _ shared.MemoryStatus) error {
 	return nil
 }
-func (m *mockMemoryRepo) WipeContent(_ context.Context, _ shared.RecordID) error { return nil }
+func (m *mockMemoryRepo) WipeContent(_ context.Context, _ shared.Scope, _ shared.RecordID) error {
+	return nil
+}
 
 type mockCtxDecisionRepo struct {
 	activeByScopeResult []decision.Decision
@@ -60,7 +62,7 @@ type mockCtxDecisionRepo struct {
 }
 
 func (m *mockCtxDecisionRepo) Save(_ context.Context, _ *decision.Decision) error { return nil }
-func (m *mockCtxDecisionRepo) FindByID(_ context.Context, _ shared.RecordID) (*decision.Decision, error) {
+func (m *mockCtxDecisionRepo) FindByID(_ context.Context, _ shared.Scope, _ shared.RecordID) (*decision.Decision, error) {
 	return nil, shared.ErrNotFound
 }
 func (m *mockCtxDecisionRepo) FindActiveByKey(_ context.Context, _ string, _ shared.Scope) (*decision.Decision, error) {
@@ -72,7 +74,7 @@ func (m *mockCtxDecisionRepo) FindByKey(_ context.Context, _ string, _ shared.Sc
 func (m *mockCtxDecisionRepo) FindActiveByScope(_ context.Context, _ shared.Scope) ([]decision.Decision, error) {
 	return m.activeByScopeResult, m.activeByScopeErr
 }
-func (m *mockCtxDecisionRepo) UpdateStatus(_ context.Context, _ shared.RecordID, _ shared.DecisionStatus, _ *shared.RecordID) error {
+func (m *mockCtxDecisionRepo) UpdateStatus(_ context.Context, _ shared.Scope, _ shared.RecordID, _ shared.DecisionStatus, _ *shared.RecordID) error {
 	return nil
 }
 
@@ -84,7 +86,7 @@ type mockCtxHeuristicRepo struct {
 func (m *mockCtxHeuristicRepo) Save(_ context.Context, _ *heuristic.HeuristicRule) error {
 	return nil
 }
-func (m *mockCtxHeuristicRepo) FindByID(_ context.Context, _ shared.RecordID) (*heuristic.HeuristicRule, error) {
+func (m *mockCtxHeuristicRepo) FindByID(_ context.Context, _ shared.Scope, _ shared.RecordID) (*heuristic.HeuristicRule, error) {
 	return nil, shared.ErrNotFound
 }
 func (m *mockCtxHeuristicRepo) FindActiveByKey(_ context.Context, _ string, _ shared.Scope) (*heuristic.HeuristicRule, error) {
@@ -93,7 +95,7 @@ func (m *mockCtxHeuristicRepo) FindActiveByKey(_ context.Context, _ string, _ sh
 func (m *mockCtxHeuristicRepo) FindByScope(_ context.Context, _ shared.Scope, _ *bool) ([]heuristic.HeuristicRule, error) {
 	return m.findByScopeResult, m.findByScopeErr
 }
-func (m *mockCtxHeuristicRepo) UpdateEnabled(_ context.Context, _ shared.RecordID, _ bool) error {
+func (m *mockCtxHeuristicRepo) UpdateEnabled(_ context.Context, _ shared.Scope, _ shared.RecordID, _ bool) error {
 	return nil
 }
 
@@ -104,17 +106,17 @@ type mockCtxRelationRepo struct {
 }
 
 func (m *mockCtxRelationRepo) Save(_ context.Context, _ *relation.Relation) error { return nil }
-func (m *mockCtxRelationRepo) FindFromSource(_ context.Context, _ shared.RecordID, _ *shared.RelationType) ([]relation.Relation, error) {
+func (m *mockCtxRelationRepo) FindFromSource(_ context.Context, _ shared.Scope, _ shared.RecordID, _ *shared.RelationType) ([]relation.Relation, error) {
 	return nil, nil
 }
-func (m *mockCtxRelationRepo) FindToTarget(_ context.Context, _ shared.RecordID, _ *shared.RelationType) ([]relation.Relation, error) {
+func (m *mockCtxRelationRepo) FindToTarget(_ context.Context, _ shared.Scope, _ shared.RecordID, _ *shared.RelationType) ([]relation.Relation, error) {
 	return nil, nil
 }
 func (m *mockCtxRelationRepo) Traverse(_ context.Context, q outbound.TraverseQuery) ([]outbound.TraverseResult, error) {
 	m.traverseQueries = append(m.traverseQueries, q)
 	return m.traverseResults, m.traverseErr
 }
-func (m *mockCtxRelationRepo) DeleteByTarget(_ context.Context, _ shared.RecordID) (int, error) {
+func (m *mockCtxRelationRepo) DeleteByTarget(_ context.Context, _ shared.Scope, _ shared.RecordID) (int, error) {
 	return 0, nil
 }
 

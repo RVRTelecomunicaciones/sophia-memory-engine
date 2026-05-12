@@ -268,14 +268,23 @@ func scanDecisionRow(row scanner) (*decision.Decision, error) {
 	return d, nil
 }
 
-// FindByID retrieves a Decision by its ID.
-// Returns shared.ErrNotFound if the record does not exist.
-func (r *DecisionPgRepository) FindByID(ctx context.Context, id shared.RecordID) (*decision.Decision, error) {
+// FindByID retrieves a Decision by its ID within the given scope.
+// Returns shared.ErrNotFound if the record does not exist OR belongs to a
+// different project (cross-project reads look identical to missing rows).
+//
+// Scope: scope is provided by the application layer from the auth context.
+// Tenant predicate: NULL tenant on the row is visible to any key in the project
+// (legacy / cross-tenant rows). A non-NULL tenant must match exactly.
+func (r *DecisionPgRepository) FindByID(ctx context.Context, scope shared.Scope, id shared.RecordID) (*decision.Decision, error) {
 	conn := getConn(ctx, r.pool)
 
-	query := `SELECT` + decisionColumns + ` FROM decisions WHERE id = $1`
+	query := `SELECT` + decisionColumns + `
+		FROM decisions
+		WHERE id = $1
+		  AND project_id = $2
+		  AND (tenant_id IS NULL OR tenant_id = $3)`
 
-	row := conn.QueryRow(ctx, query, id.String())
+	row := conn.QueryRow(ctx, query, id.String(), scope.ProjectID, scope.TenantID)
 	d, err := scanDecisionRow(row)
 	if err != nil {
 		if err.Error() == "no rows in result set" {
@@ -409,14 +418,21 @@ func (r *DecisionPgRepository) FindActiveByScope(ctx context.Context, scope shar
 	return results, nil
 }
 
-// UpdateStatus changes the status and optional superseded_by of a decision.
-// Returns shared.ErrNotFound if no rows are affected.
-func (r *DecisionPgRepository) UpdateStatus(ctx context.Context, id shared.RecordID, status shared.DecisionStatus, supersededBy *shared.RecordID) error {
+// UpdateStatus changes the status and optional superseded_by of a scoped decision.
+// Returns shared.ErrNotFound if no rows are affected within scope
+// (including cross-project access — the two cases are indistinguishable).
+//
+// Scope: scope is provided by the application layer from the auth context.
+func (r *DecisionPgRepository) UpdateStatus(ctx context.Context, scope shared.Scope, id shared.RecordID, status shared.DecisionStatus, supersededBy *shared.RecordID) error {
 	conn := getConn(ctx, r.pool)
 
-	const query = `UPDATE decisions SET status = $1, superseded_by = $2, updated_at = NOW() WHERE id = $3`
+	const query = `
+		UPDATE decisions SET status = $1, superseded_by = $2, updated_at = NOW()
+		WHERE id = $3
+		  AND project_id = $4
+		  AND (tenant_id IS NULL OR tenant_id = $5)`
 
-	tag, err := conn.Exec(ctx, query, string(status), ptrRecordIDStr(supersededBy), id.String())
+	tag, err := conn.Exec(ctx, query, string(status), ptrRecordIDStr(supersededBy), id.String(), scope.ProjectID, scope.TenantID)
 	if err != nil {
 		return err
 	}
