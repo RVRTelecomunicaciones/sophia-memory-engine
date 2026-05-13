@@ -39,6 +39,9 @@ func NewRouter(
 		r.Use(middleware.APIKey(authSvc))
 		memHandler := NewMemoryHandler(memorySvc)
 		r.Post("/memories", memHandler.Ingest)
+		// by-topic-key route MUST come before /{id} so chi doesn't capture
+		// "by-topic-key" as an id parameter.
+		r.Get("/memories/by-topic-key", memHandler.GetByTopicKey)
 		r.Get("/memories/{id}", memHandler.Get)
 		r.Post("/memories/{id}/archive", memHandler.Archive)
 

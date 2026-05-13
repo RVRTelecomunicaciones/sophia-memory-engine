@@ -39,5 +39,6 @@ type ArchiveMemoryCmd struct {
 type MemoryService interface {
 	Ingest(ctx context.Context, cmd IngestMemoryCmd) (*IngestMemoryResult, error)
 	Get(ctx context.Context, id shared.RecordID) (*memory.MemoryRecord, error)
+	GetByTopicKey(ctx context.Context, projectID, topicKey string) (*memory.MemoryRecord, error)
 	Archive(ctx context.Context, cmd ArchiveMemoryCmd) error
 }

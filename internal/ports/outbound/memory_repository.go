@@ -21,10 +21,27 @@ type MemoryRepository interface {
 	// Save persists a new memory record. Scope is embedded in record.Scope.
 	Save(ctx context.Context, record *memory.MemoryRecord) error
 
+	// UpsertByTopicKey inserts the record, or — when an active row already
+	// exists in the same scope (project_id + tenant_id) with the same
+	// topic_key — updates that row's content + provenance + temporal fields
+	// in place. The returned id is the existing row's id on an update;
+	// `inserted` is true iff a new row was created. Implementations MUST rely
+	// on the partial unique index introduced in migration 004 (ADR-0005 P1.3)
+	// so that concurrent calls converge to exactly one active row.
+	//
+	// Scope assertion (P1.5) MUST be performed by the application layer
+	// BEFORE this method is called.
+	UpsertByTopicKey(ctx context.Context, record *memory.MemoryRecord) (id shared.RecordID, inserted bool, err error)
+
 	// FindByID retrieves a memory record scoped to authScope.
 	// Returns shared.ErrNotFound if the record does not exist or belongs to a
 	// different project (cross-project reads look identical to missing rows).
 	FindByID(ctx context.Context, scope shared.Scope, id shared.RecordID) (*memory.MemoryRecord, error)
+
+	// FindActiveByTopicKey retrieves the unique active memory record for a
+	// (scope, topic_key) tuple. Returns shared.ErrNotFound when no active row
+	// matches within the supplied scope.
+	FindActiveByTopicKey(ctx context.Context, scope shared.Scope, topicKey string) (*memory.MemoryRecord, error)
 
 	// UpdateStatus transitions the status of a scoped memory record.
 	// Returns shared.ErrNotFound if the record does not exist within scope.

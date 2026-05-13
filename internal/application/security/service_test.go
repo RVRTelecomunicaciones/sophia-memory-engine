@@ -57,10 +57,16 @@ type mockMemoryRepo struct {
 }
 
 func (m *mockMemoryRepo) Save(_ context.Context, _ *memory.MemoryRecord) error { return nil }
+func (m *mockMemoryRepo) UpsertByTopicKey(_ context.Context, rec *memory.MemoryRecord) (shared.RecordID, bool, error) {
+	return rec.ID, true, nil
+}
 func (m *mockMemoryRepo) FindByID(ctx context.Context, scope shared.Scope, id shared.RecordID) (*memory.MemoryRecord, error) {
 	if m.findByIDFunc != nil {
 		return m.findByIDFunc(ctx, scope, id)
 	}
+	return nil, shared.ErrNotFound
+}
+func (m *mockMemoryRepo) FindActiveByTopicKey(_ context.Context, _ shared.Scope, _ string) (*memory.MemoryRecord, error) {
 	return nil, shared.ErrNotFound
 }
 func (m *mockMemoryRepo) UpdateStatus(_ context.Context, _ shared.Scope, _ shared.RecordID, _ shared.MemoryStatus) error {

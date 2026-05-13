@@ -225,6 +225,23 @@ func (h *MemoryHandler) Get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toMemoryResponse(record))
 }
 
+// GetByTopicKey handles GET /api/v1/memories/by-topic-key?project_id=&topic_key=.
+// Returns the unique active memory for the (project_id, topic_key) tuple.
+// Cross-project requests masquerade as 404 (ADR-0005 §P1.5 existence leak
+// prevention).
+func (h *MemoryHandler) GetByTopicKey(w http.ResponseWriter, r *http.Request) {
+	projectID := r.URL.Query().Get("project_id")
+	topicKey := r.URL.Query().Get("topic_key")
+
+	record, err := h.svc.GetByTopicKey(r.Context(), projectID, topicKey)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toMemoryResponse(record))
+}
+
 // Archive handles POST /api/v1/memories/{id}/archive.
 func (h *MemoryHandler) Archive(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")

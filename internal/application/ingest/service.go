@@ -2,6 +2,8 @@ package ingest
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 
 	"github.com/sophia-engine/memory-engine/internal/domain/auth"
 	"github.com/sophia-engine/memory-engine/internal/domain/memory"
@@ -111,14 +113,38 @@ func (s *Service) Ingest(ctx context.Context, cmd inbound.IngestMemoryCmd) (*inb
 		return nil, err
 	}
 
-	if err := s.memRepo.Save(ctx, record); err != nil {
-		return nil, err
+	// Branch on topic_key presence:
+	//   - no topic_key → always INSERT a new row (legacy semantics).
+	//   - topic_key set → UPSERT against the partial unique index
+	//     idx_memories_topic_key_active_unique. Concurrent ingests with the
+	//     same (scope, topic_key) converge to exactly ONE active row
+	//     (ADR-0005 P1.3).
+	//
+	// Scope assertion (P1.5) above runs for BOTH branches, so an upsert
+	// cannot mutate a row in another project's scope.
+	finalID := record.ID
+	if record.TopicKey != nil && *record.TopicKey != "" {
+		id, inserted, upErr := s.memRepo.UpsertByTopicKey(ctx, record)
+		if upErr != nil {
+			return nil, fmt.Errorf("ingest: upsert by topic_key: %w", upErr)
+		}
+		finalID = id
+		slog.DebugContext(ctx, "ingest upsert by topic_key",
+			slog.String("topic_key", *record.TopicKey),
+			slog.String("project_id", record.Scope.ProjectID),
+			slog.String("id", id.String()),
+			slog.Bool("inserted", inserted),
+		)
+	} else {
+		if err := s.memRepo.Save(ctx, record); err != nil {
+			return nil, fmt.Errorf("ingest: save: %w", err)
+		}
 	}
 
 	// At-most-once event publishing — ignore errors.
 	_ = s.eventPub.Publish(ctx, outbound.DomainEvent{
 		Type:          shared.EventTypeMemoryIngested,
-		AggregateID:   record.ID,
+		AggregateID:   finalID,
 		AggregateType: "memory",
 		Scope:         record.Scope,
 		Payload:       nil,
@@ -126,7 +152,7 @@ func (s *Service) Ingest(ctx context.Context, cmd inbound.IngestMemoryCmd) (*inb
 	})
 
 	return &inbound.IngestMemoryResult{
-		ID:        record.ID,
+		ID:        finalID,
 		CreatedAt: record.CreatedAt,
 	}, nil
 }
@@ -138,7 +164,51 @@ func (s *Service) Ingest(ctx context.Context, cmd inbound.IngestMemoryCmd) (*inb
 // existence leaks.
 func (s *Service) Get(ctx context.Context, id shared.RecordID) (*memory.MemoryRecord, error) {
 	scope := scopeFromCtxOrEmpty(ctx)
-	return s.memRepo.FindByID(ctx, scope, id)
+	rec, err := s.memRepo.FindByID(ctx, scope, id)
+	if err != nil {
+		return nil, fmt.Errorf("ingest: get: %w", err)
+	}
+	return rec, nil
+}
+
+// GetByTopicKey retrieves the unique active memory record for the given
+// project_id + topic_key. The auth scope (when present) MUST match the
+// requested project_id or the repo lookup will return ErrNotFound (existence
+// leak prevention — see ADR-0005 §P1.5).
+//
+// projectID is required because topic_key uniqueness is scoped per project.
+func (s *Service) GetByTopicKey(ctx context.Context, projectID, topicKey string) (*memory.MemoryRecord, error) {
+	if projectID == "" {
+		return nil, shared.NewValidationError(shared.FieldError{
+			Field:   "project_id",
+			Message: "required",
+		})
+	}
+	if topicKey == "" {
+		return nil, shared.NewValidationError(shared.FieldError{
+			Field:   "topic_key",
+			Message: "required",
+		})
+	}
+
+	scope := scopeFromCtxOrEmpty(ctx)
+	// If auth is present, the requested project must match. Otherwise build
+	// a scope from the requested project_id (internal flows / tests with no
+	// auth context).
+	if _, ok := authScope(ctx); ok {
+		if scope.ProjectID != projectID {
+			// Cross-project lookup masquerades as not-found.
+			return nil, shared.ErrNotFound
+		}
+	} else {
+		scope = shared.Scope{ProjectID: projectID}
+	}
+
+	rec, err := s.memRepo.FindActiveByTopicKey(ctx, scope, topicKey)
+	if err != nil {
+		return nil, fmt.Errorf("ingest: get_by_topic_key: %w", err)
+	}
+	return rec, nil
 }
 
 // Archive transitions a memory record to archived status.
