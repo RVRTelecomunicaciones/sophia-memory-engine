@@ -1,0 +1,19 @@
+name: OpenAPI Validation
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: OpenAPI spec loads and matches chi router
+        run: go test ./test/openapi/... -count=1 -v

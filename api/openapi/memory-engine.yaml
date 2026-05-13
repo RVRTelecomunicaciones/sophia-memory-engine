@@ -1,0 +1,1934 @@
+openapi: 3.1.0
+
+info:
+  title: Sophia Memory Engine
+  version: 0.5.0
+  description: |
+    Persistent memory store for the Sophia agent ecosystem.
+    Provides ingest, retrieval, decisions, heuristics, relations, purge, and feedback.
+    See CLAUDE.md in the repository root for architectural constraints.
+  contact:
+    name: Sophia Platform Team
+
+servers:
+  - url: http://localhost:8081
+    description: Full-stack compose (memory-engine port)
+  - url: http://localhost:8080
+    description: Standalone dev
+
+security:
+  - apiKeyAuth: []
+
+components:
+  securitySchemes:
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  schemas:
+    # ── Shared ─────────────────────────────────────────────────────────────────
+
+    Scope:
+      type: object
+      required: [project_id]
+      properties:
+        tenant_id:
+          type: string
+          nullable: true
+          example: tenant-acme
+        project_id:
+          type: string
+          example: proj-sophia
+        repo_id:
+          type: string
+          nullable: true
+          example: repo-memory-engine
+        agent_id:
+          type: string
+          nullable: true
+          example: agent-claude
+        session_id:
+          type: string
+          nullable: true
+          example: sess-01JT3
+        environment:
+          type: string
+          nullable: true
+          example: production
+
+    ProvenanceInput:
+      type: object
+      required: [source, method]
+      properties:
+        source:
+          type: string
+          example: claude-code
+        source_uri:
+          type: string
+          nullable: true
+          example: https://github.com/sophia-engine/memory-engine
+        method:
+          type: string
+          example: direct
+        parent_id:
+          type: string
+          nullable: true
+          example: 01JT3XXXXXXXXXXXXXXXXXX
+
+    ProvenanceOutput:
+      type: object
+      required: [source, method]
+      properties:
+        source:
+          type: string
+          example: claude-code
+        source_uri:
+          type: string
+          nullable: true
+          example: https://github.com/sophia-engine/memory-engine
+        method:
+          type: string
+          example: direct
+        parent_id:
+          type: string
+          nullable: true
+          example: 01JT3XXXXXXXXXXXXXXXXXX
+
+    Temporal:
+      type: object
+      required: [freshness]
+      properties:
+        valid_from:
+          type: string
+          format: date-time
+          nullable: true
+        valid_until:
+          type: string
+          format: date-time
+          nullable: true
+        last_accessed:
+          type: string
+          format: date-time
+          nullable: true
+        freshness:
+          type: string
+          example: fresh
+
+    ImportanceFactor:
+      type: object
+      required: [name, weight, value]
+      properties:
+        name:
+          type: string
+          example: recency
+        weight:
+          type: number
+          format: double
+          example: 0.4
+        value:
+          type: number
+          format: double
+          example: 0.87
+
+    Importance:
+      type: object
+      required: [score, computed_at, factors]
+      properties:
+        score:
+          type: number
+          format: double
+          example: 0.72
+        computed_at:
+          type: string
+          format: date-time
+        factors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ImportanceFactor'
+
+    Confidence:
+      type: object
+      required: [score, source]
+      properties:
+        score:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          example: 0.85
+        source:
+          type: string
+          example: human
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          example: not found
+
+    ValidationErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          example: validation_error
+        fields:
+          type: object
+          additionalProperties:
+            type: string
+
+    # ── Memory ─────────────────────────────────────────────────────────────────
+
+    IngestRequest:
+      type: object
+      required: [type, content, scope, provenance]
+      properties:
+        type:
+          type: string
+          example: decision
+        content:
+          type: string
+          example: Use pgx/v5 for all Postgres access.
+        summary:
+          type: string
+          nullable: true
+          example: pgx/v5 chosen over database/sql
+        tags:
+          type: array
+          items:
+            type: string
+          example: [architecture, postgres]
+        topic_key:
+          type: string
+          nullable: true
+          example: architecture/db-driver
+        fts_language:
+          type: string
+          nullable: true
+          example: english
+        scope:
+          $ref: '#/components/schemas/Scope'
+        provenance:
+          $ref: '#/components/schemas/ProvenanceInput'
+        valid_from:
+          type: string
+          format: date-time
+          nullable: true
+        valid_until:
+          type: string
+          format: date-time
+          nullable: true
+
+    IngestResponse:
+      type: object
+      required: [id, created_at]
+      properties:
+        id:
+          type: string
+          example: 01JT3XXXXXXXXXXXXXXXXXX
+        created_at:
+          type: string
+          format: date-time
+
+    MemoryRecord:
+      type: object
+      required: [id, type, content, tags, scope, provenance, temporal, importance, status, fts_language, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          example: 01JT3XXXXXXXXXXXXXXXXXX
+        type:
+          type: string
+          example: decision
+        content:
+          type: string
+          example: Use pgx/v5 for all Postgres access.
+        summary:
+          type: string
+          nullable: true
+        tags:
+          type: array
+          items:
+            type: string
+        topic_key:
+          type: string
+          nullable: true
+        scope:
+          $ref: '#/components/schemas/Scope'
+        provenance:
+          $ref: '#/components/schemas/ProvenanceOutput'
+        temporal:
+          $ref: '#/components/schemas/Temporal'
+        importance:
+          $ref: '#/components/schemas/Importance'
+        status:
+          type: string
+          example: active
+        archived_by:
+          type: string
+          nullable: true
+        archive_reason:
+          type: string
+          nullable: true
+        fts_language:
+          type: string
+          example: english
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ArchiveRequest:
+      type: object
+      required: [reason, requested_by]
+      properties:
+        reason:
+          type: string
+          example: superseded by new decision
+        requested_by:
+          type: string
+          example: agent-claude
+
+    ArchiveResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: archived
+
+    # ── Decision ───────────────────────────────────────────────────────────────
+
+    EvidenceInput:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          example: memory
+        record_id:
+          type: string
+          nullable: true
+          example: 01JT3XXXXXXXXXXXXXXXXXX
+        uri:
+          type: string
+          nullable: true
+          example: https://adr.example.com/0005
+        excerpt:
+          type: string
+          nullable: true
+          example: See section 4.2 for rationale.
+
+    EvidenceOutput:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          example: memory
+        record_id:
+          type: string
+          nullable: true
+        uri:
+          type: string
+          nullable: true
+        excerpt:
+          type: string
+          nullable: true
+
+    RecordDecisionRequest:
+      type: object
+      required: [decision_key, title, description, rationale, evidence, scope, provenance, confidence]
+      properties:
+        decision_key:
+          type: string
+          example: arch/db-driver
+        title:
+          type: string
+          example: Choose pgx/v5 over database/sql
+        description:
+          type: string
+          example: We evaluated pgx/v5 and database/sql.
+        rationale:
+          type: string
+          example: pgx/v5 offers named parameters and better error handling.
+        evidence:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvidenceInput'
+        scope:
+          $ref: '#/components/schemas/Scope'
+        provenance:
+          $ref: '#/components/schemas/ProvenanceInput'
+        confidence:
+          $ref: '#/components/schemas/Confidence'
+        valid_from:
+          type: string
+          format: date-time
+          nullable: true
+
+    RecordDecisionResponse:
+      type: object
+      required: [id, version, created_at]
+      properties:
+        id:
+          type: string
+          example: 01JT3XXXXXXXXXXXXXXXXXX
+        version:
+          type: integer
+          example: 1
+        superseded:
+          type: string
+          nullable: true
+          example: 01JT3XXXXXXXXXXXXXXXXXY
+        created_at:
+          type: string
+          format: date-time
+
+    Decision:
+      type: object
+      required: [id, decision_key, version, title, description, rationale, evidence, scope, provenance, temporal, confidence, status, fts_language, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          example: 01JT3XXXXXXXXXXXXXXXXXX
+        decision_key:
+          type: string
+          example: arch/db-driver
+        version:
+          type: integer
+          example: 2
+        title:
+          type: string
+        description:
+          type: string
+        rationale:
+          type: string
+        evidence:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvidenceOutput'
+        scope:
+          $ref: '#/components/schemas/Scope'
+        provenance:
+          $ref: '#/components/schemas/ProvenanceOutput'
+        temporal:
+          $ref: '#/components/schemas/Temporal'
+        confidence:
+          $ref: '#/components/schemas/Confidence'
+        status:
+          type: string
+          example: active
+        superseded_by:
+          type: string
+          nullable: true
+        fts_language:
+          type: string
+          example: english
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ContradictRequest:
+      type: object
+      required: [contradicted_by, reason]
+      properties:
+        contradicted_by:
+          type: string
+          example: 01JT3XXXXXXXXXXXXXXXXXY
+        reason:
+          type: string
+          example: New benchmark shows a different approach is faster.
+
+    ContradictResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: contradicted
+
+    # ── Heuristic ──────────────────────────────────────────────────────────────
+
+    CreateHeuristicRequest:
+      type: object
+      required: [heuristic_key, condition, action, rationale, scope, provenance, confidence]
+      properties:
+        heuristic_key:
+          type: string
+          example: perf/avoid-n-plus-one
+        condition:
+          type: string
+          example: When loading a list of entities that each need related records
+        action:
+          type: string
+          example: Use a JOIN or a single batch query instead of per-row queries
+        rationale:
+          type: string
+          example: N+1 queries degrade performance linearly with list size.
+        scope:
+          $ref: '#/components/schemas/Scope'
+        provenance:
+          $ref: '#/components/schemas/ProvenanceInput'
+        confidence:
+          $ref: '#/components/schemas/Confidence'
+        enabled:
+          type: boolean
+          nullable: true
+          example: true
+        valid_until:
+          type: string
+          format: date-time
+          nullable: true
+        fts_language:
+          type: string
+          nullable: true
+          example: english
+
+    CreateHeuristicResponse:
+      type: object
+      required: [id, version, created_at]
+      properties:
+        id:
+          type: string
+          example: 01JT3XXXXXXXXXXXXXXXXXX
+        version:
+          type: integer
+          example: 1
+        disabled_previous:
+          type: string
+          nullable: true
+          example: 01JT3XXXXXXXXXXXXXXXXXY
+        created_at:
+          type: string
+          format: date-time
+
+    HeuristicProvenance:
+      type: object
+      required: [source, method]
+      properties:
+        source:
+          type: string
+          example: claude-code
+        source_uri:
+          type: string
+          nullable: true
+        method:
+          type: string
+          example: direct
+
+    Heuristic:
+      type: object
+      required: [id, heuristic_key, version, condition, action, rationale, scope, provenance, confidence, enabled, temporal, fts_language, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          example: 01JT3XXXXXXXXXXXXXXXXXX
+        heuristic_key:
+          type: string
+          example: perf/avoid-n-plus-one
+        version:
+          type: integer
+          example: 1
+        condition:
+          type: string
+        action:
+          type: string
+        rationale:
+          type: string
+        scope:
+          $ref: '#/components/schemas/Scope'
+        provenance:
+          $ref: '#/components/schemas/HeuristicProvenance'
+        confidence:
+          $ref: '#/components/schemas/Confidence'
+        enabled:
+          type: boolean
+          example: true
+        temporal:
+          $ref: '#/components/schemas/Temporal'
+        fts_language:
+          type: string
+          example: english
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ToggleHeuristicRequest:
+      type: object
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+          example: false
+
+    ToggleHeuristicResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: toggled
+
+    # ── Relation ───────────────────────────────────────────────────────────────
+
+    CreateRelationRequest:
+      type: object
+      required: [source_id, target_id, type, scope]
+      properties:
+        source_id:
+          type: string
+          example: 01JT3XXXXXXXXXXXXXXXXXX
+        target_id:
+          type: string
+          example: 01JT3XXXXXXXXXXXXXXXXXY
+        type:
+          type: string
+          example: derived_from
+        metadata:
+          type: object
+          additionalProperties: true
+          nullable: true
+        scope:
+          $ref: '#/components/schemas/Scope'
+        valid_from:
+          type: string
+          format: date-time
+          nullable: true
+
+    CreateRelationResponse:
+      type: object
+      required: [id, created_at]
+      properties:
+        id:
+          type: string
+          example: 01JT3XXXXXXXXXXXXXXXXXX
+        created_at:
+          type: string
+          format: date-time
+
+    RelationResult:
+      type: object
+      required: [id, source_id, target_id, type, depth, path, created_at]
+      properties:
+        id:
+          type: string
+          example: 01JT3XXXXXXXXXXXXXXXXXX
+        source_id:
+          type: string
+          example: 01JT3XXXXXXXXXXXXXXXXXX
+        target_id:
+          type: string
+          example: 01JT3XXXXXXXXXXXXXXXXXY
+        type:
+          type: string
+          example: derived_from
+        metadata:
+          type: object
+          additionalProperties: true
+          nullable: true
+        depth:
+          type: integer
+          example: 1
+        path:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+
+    # ── Search ─────────────────────────────────────────────────────────────────
+
+    SearchRequest:
+      type: object
+      required: [query, scope]
+      properties:
+        query:
+          type: string
+          example: postgres connection pooling
+        scope:
+          $ref: '#/components/schemas/Scope'
+        types:
+          type: array
+          items:
+            type: string
+          example: [decision, memory]
+          nullable: true
+        limit:
+          type: integer
+          nullable: true
+          example: 20
+        offset:
+          type: integer
+          nullable: true
+          example: 0
+
+    Ranking:
+      type: object
+      required: [fts_score, trgm_score, recency_boost, importance_score, type_boost, freshness_boost, scope_exactness, final_score]
+      properties:
+        fts_score:
+          type: number
+          format: double
+        trgm_score:
+          type: number
+          format: double
+        recency_boost:
+          type: number
+          format: double
+        importance_score:
+          type: number
+          format: double
+        type_boost:
+          type: number
+          format: double
+        freshness_boost:
+          type: number
+          format: double
+        scope_exactness:
+          type: number
+          format: double
+        final_score:
+          type: number
+          format: double
+
+    SearchResult:
+      type: object
+      required: [id, record_type, title, snippet, score, ranking, freshness, created_at]
+      properties:
+        id:
+          type: string
+          example: 01JT3XXXXXXXXXXXXXXXXXX
+        record_type:
+          type: string
+          example: decision
+        title:
+          type: string
+          example: Choose pgx/v5 over database/sql
+        snippet:
+          type: string
+          example: pgx/v5 offers named parameters and better error handling.
+        score:
+          type: number
+          format: double
+          example: 0.93
+        ranking:
+          $ref: '#/components/schemas/Ranking'
+        freshness:
+          type: string
+          example: fresh
+        created_at:
+          type: string
+          format: date-time
+
+    SearchResponse:
+      type: object
+      required: [results, total_count, query]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchResult'
+        total_count:
+          type: integer
+          example: 42
+        query:
+          type: string
+          example: postgres connection pooling
+
+    # ── Context ────────────────────────────────────────────────────────────────
+
+    ContextRequest:
+      type: object
+      required: [scope]
+      properties:
+        scope:
+          $ref: '#/components/schemas/Scope'
+        query:
+          type: string
+          nullable: true
+          example: database access patterns
+        max_tokens:
+          type: integer
+          nullable: true
+          example: 4096
+        include_types:
+          type: array
+          items:
+            type: string
+          nullable: true
+          example: [decision, heuristic]
+        expand_graph:
+          type: boolean
+          nullable: true
+          example: true
+
+    ContextRecord:
+      type: object
+      required: [id, type, content, score]
+      properties:
+        id:
+          type: string
+          example: 01JT3XXXXXXXXXXXXXXXXXX
+        type:
+          type: string
+          example: decision
+        content:
+          type: string
+          example: Use pgx/v5 for all Postgres access.
+        score:
+          type: number
+          format: double
+          example: 0.91
+        relation:
+          type: string
+          nullable: true
+          example: derived_from
+
+    ContextSection:
+      type: object
+      required: [type, records, token_count]
+      properties:
+        type:
+          type: string
+          example: decision
+        records:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContextRecord'
+        token_count:
+          type: integer
+          example: 312
+
+    ContextDebug:
+      type: object
+      required: [strategy, records_scanned, records_included, graph_expanded, graph_depth, token_budget_used, duration_ms]
+      properties:
+        strategy:
+          type: string
+          example: fts+graph
+        records_scanned:
+          type: integer
+          example: 120
+        records_included:
+          type: integer
+          example: 18
+        graph_expanded:
+          type: boolean
+          example: true
+        graph_depth:
+          type: integer
+          example: 2
+        token_budget_used:
+          type: integer
+          example: 3800
+        duration_ms:
+          type: integer
+          format: int64
+          example: 47
+
+    ContextBundle:
+      type: object
+      required: [sections, total_tokens, truncated, generated_at]
+      properties:
+        sections:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContextSection'
+        total_tokens:
+          type: integer
+          example: 3800
+        truncated:
+          type: boolean
+          example: false
+        generated_at:
+          type: string
+          format: date-time
+        debug_info:
+          $ref: '#/components/schemas/ContextDebug'
+          nullable: true
+
+    # ── Purge ──────────────────────────────────────────────────────────────────
+
+    PurgeRequest:
+      type: object
+      required: [target_id, reason, requested_by, audit_note]
+      properties:
+        target_id:
+          type: string
+          example: 01JT3XXXXXXXXXXXXXXXXXX
+        reason:
+          type: string
+          example: gdpr_erasure
+        requested_by:
+          type: string
+          example: privacy-officer@example.com
+        audit_note:
+          type: string
+          example: GDPR Article 17 request 2026-042
+
+    PurgedArtifacts:
+      type: object
+      required: [fts_invalidated, embedding_invalidated, cache_invalidated, relations_removed, derived_invalidated]
+      properties:
+        fts_invalidated:
+          type: boolean
+          example: true
+        embedding_invalidated:
+          type: boolean
+          example: true
+        cache_invalidated:
+          type: boolean
+          example: true
+        relations_removed:
+          type: integer
+          example: 3
+        derived_invalidated:
+          type: array
+          items:
+            type: string
+
+    PurgeRecord:
+      type: object
+      required: [id, target_id, target_type, reason, requested_by, audit_note, status, created_at]
+      properties:
+        id:
+          type: string
+          example: 01JT3XXXXXXXXXXXXXXXXXX
+        target_id:
+          type: string
+          example: 01JT3XXXXXXXXXXXXXXXXXY
+        target_type:
+          type: string
+          example: memory
+        reason:
+          type: string
+          example: gdpr_erasure
+        requested_by:
+          type: string
+          example: privacy-officer@example.com
+        audit_note:
+          type: string
+          example: GDPR Article 17 request 2026-042
+        status:
+          type: string
+          example: pending
+        artifacts_purged:
+          $ref: '#/components/schemas/PurgedArtifacts'
+          nullable: true
+        executed_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    # ── Feedback ───────────────────────────────────────────────────────────────
+
+    FeedbackRequest:
+      type: object
+      required: [target, type, query, scope, result_ids, selected_ids, actor]
+      properties:
+        target:
+          type: string
+          example: search
+        type:
+          type: string
+          example: click
+        query:
+          type: string
+          example: postgres connection pooling
+        scope:
+          $ref: '#/components/schemas/Scope'
+        result_ids:
+          type: array
+          items:
+            type: string
+          example: [01JT3XXXXXXXXXXXXXXXXXX, 01JT3XXXXXXXXXXXXXXXXXY]
+        selected_ids:
+          type: array
+          items:
+            type: string
+          example: [01JT3XXXXXXXXXXXXXXXXXX]
+        actor:
+          type: string
+          example: agent-claude
+        metadata:
+          type: object
+          additionalProperties: true
+          nullable: true
+
+    FeedbackResponse:
+      type: object
+      required: [id, created_at]
+      properties:
+        id:
+          type: string
+          example: 01JT3XXXXXXXXXXXXXXXXXX
+        created_at:
+          type: string
+          format: date-time
+
+    # ── Health / Ready ─────────────────────────────────────────────────────────
+
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: ok
+
+    ReadyChecks:
+      type: object
+      required: [db]
+      properties:
+        db:
+          type: string
+          example: ok
+
+    ReadyResponse:
+      type: object
+      required: [status, checks]
+      properties:
+        status:
+          type: string
+          example: ready
+        checks:
+          $ref: '#/components/schemas/ReadyChecks'
+
+  responses:
+    BadRequest:
+      description: Validation or parse error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationErrorResponse'
+
+    Unauthorized:
+      description: Missing or invalid X-API-Key header
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: unauthorized
+
+    Forbidden:
+      description: Cross-project write or scope mismatch (ADR-0005 section P1.5)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: forbidden
+
+    NotFound:
+      description: Record not found (or exists in another project; same response to prevent existence leaks)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: not found
+
+    Conflict:
+      description: Duplicate, already-archived, or already-executed conflict
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    Gone:
+      description: Record was hard-purged and is no longer accessible
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: purged
+
+    InternalServerError:
+      description: Unexpected server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: internal server error
+
+paths:
+  # ── Probes (no auth) ───────────────────────────────────────────────────────
+
+  /health:
+    get:
+      operationId: getHealth
+      summary: Liveness probe
+      description: Returns 200 when the process is alive. No dependency checks.
+      tags: [Probes]
+      security: []
+      responses:
+        '200':
+          description: Process is alive
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: ok
+
+  /ready:
+    get:
+      operationId: getReady
+      summary: Readiness probe
+      description: Returns 200 when all downstream dependencies (currently Postgres) are healthy; 503 otherwise.
+      tags: [Probes]
+      security: []
+      responses:
+        '200':
+          description: All dependencies healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyResponse'
+              example:
+                status: ready
+                checks:
+                  db: ok
+        '503':
+          description: One or more dependencies degraded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyResponse'
+              example:
+                status: degraded
+                checks:
+                  db: "dial tcp 127.0.0.1:5432: connection refused"
+
+  # ── Memories ───────────────────────────────────────────────────────────────
+
+  /api/v1/memories:
+    post:
+      operationId: ingestMemory
+      summary: Ingest a memory
+      description: |
+        Creates a new memory record. If topic_key is present and an active record
+        with the same (project_id, topic_key) already exists, the existing record
+        is superseded (upsert semantics — ADR-0005 section P1.3).
+      tags: [Memories]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IngestRequest'
+      responses:
+        '201':
+          description: Memory ingested
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/memories/by-topic-key:
+    get:
+      operationId: getMemoryByTopicKey
+      summary: Get active memory by topic key
+      description: |
+        Returns the unique active memory for the (project_id, topic_key) pair.
+        Cross-project requests return 404 to prevent existence leaks (ADR-0005 section P1.5).
+      tags: [Memories]
+      parameters:
+        - name: project_id
+          in: query
+          required: true
+          schema:
+            type: string
+          example: proj-sophia
+        - name: topic_key
+          in: query
+          required: true
+          schema:
+            type: string
+          example: architecture/db-driver
+      responses:
+        '200':
+          description: Active memory found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryRecord'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/memories/{id}:
+    get:
+      operationId: getMemory
+      summary: Get a memory by ID
+      tags: [Memories]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: 01JT3XXXXXXXXXXXXXXXXXX
+      responses:
+        '200':
+          description: Memory found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryRecord'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          $ref: '#/components/responses/Gone'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/memories/{id}/archive:
+    post:
+      operationId: archiveMemory
+      summary: Archive a memory
+      description: Marks the memory as archived. Returns 409 if it is already archived.
+      tags: [Memories]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: 01JT3XXXXXXXXXXXXXXXXXX
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ArchiveRequest'
+      responses:
+        '200':
+          description: Memory archived
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArchiveResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ── Decisions ──────────────────────────────────────────────────────────────
+
+  /api/v1/decisions:
+    post:
+      operationId: recordDecision
+      summary: Record a decision
+      description: |
+        Records a new version of a decision. If a decision with the same decision_key
+        and scope already exists, the old version is superseded and superseded in
+        the response will contain its ID.
+      tags: [Decisions]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecordDecisionRequest'
+      responses:
+        '201':
+          description: Decision recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecordDecisionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/decisions/{id}:
+    get:
+      operationId: getDecision
+      summary: Get a decision by ID
+      tags: [Decisions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: 01JT3XXXXXXXXXXXXXXXXXX
+      responses:
+        '200':
+          description: Decision found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Decision'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/decisions/history/{key}:
+    get:
+      operationId: getDecisionHistory
+      summary: Decision history by key
+      description: Returns all versions of a decision ordered by version descending.
+      tags: [Decisions]
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          example: arch/db-driver
+        - name: project_id
+          in: query
+          required: true
+          schema:
+            type: string
+          example: proj-sophia
+        - name: tenant_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: repo_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: agent_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: session_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: environment
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Decision history (may be empty array)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Decision'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/decisions/{id}/contradict:
+    post:
+      operationId: contradictDecision
+      summary: Mark a decision as contradicted
+      description: |
+        Marks the target decision as contradicted by the decision whose ID is
+        provided in the request body. The contradicting decision must already exist.
+      tags: [Decisions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: 01JT3XXXXXXXXXXXXXXXXXX
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContradictRequest'
+      responses:
+        '200':
+          description: Decision marked contradicted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContradictResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ── Heuristics ─────────────────────────────────────────────────────────────
+
+  /api/v1/heuristics:
+    post:
+      operationId: createHeuristic
+      summary: Create a heuristic
+      description: |
+        Creates a new version of a heuristic rule. If an enabled heuristic with the
+        same heuristic_key exists, it is automatically disabled and its ID is
+        returned in disabled_previous.
+      tags: [Heuristics]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateHeuristicRequest'
+      responses:
+        '201':
+          description: Heuristic created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateHeuristicResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    get:
+      operationId: listHeuristics
+      summary: List heuristics by scope
+      tags: [Heuristics]
+      parameters:
+        - name: project_id
+          in: query
+          required: true
+          schema:
+            type: string
+          example: proj-sophia
+        - name: tenant_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: repo_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: agent_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: session_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: environment
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: enabled
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: ['true', 'false']
+          description: Filter by enabled state. Omit to return all.
+      responses:
+        '200':
+          description: List of heuristics (may be empty array)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Heuristic'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/heuristics/active/{key}:
+    get:
+      operationId: getActiveHeuristic
+      summary: Get active heuristic by key
+      description: Returns the single currently-enabled heuristic for the given key and scope.
+      tags: [Heuristics]
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          example: perf/avoid-n-plus-one
+        - name: project_id
+          in: query
+          required: true
+          schema:
+            type: string
+          example: proj-sophia
+        - name: repo_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: agent_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: environment
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Active heuristic found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Heuristic'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/heuristics/{id}/toggle:
+    post:
+      operationId: toggleHeuristic
+      summary: Enable or disable a heuristic
+      tags: [Heuristics]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: 01JT3XXXXXXXXXXXXXXXXXX
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ToggleHeuristicRequest'
+      responses:
+        '200':
+          description: Heuristic toggled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToggleHeuristicResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ── Relations ──────────────────────────────────────────────────────────────
+
+  /api/v1/relations:
+    post:
+      operationId: createRelation
+      summary: Record a relation
+      description: |
+        Creates a directed relation edge between two records.
+        Returns 409 if the identical (source_id, target_id, type) edge already
+        exists in the same scope.
+      tags: [Relations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRelationRequest'
+      responses:
+        '201':
+          description: Relation created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateRelationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/relations/from/{id}:
+    get:
+      operationId: getRelationsFrom
+      summary: Relations originating from a record
+      description: Traverses the graph outward from the given record ID up to max_depth hops.
+      tags: [Relations]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: 01JT3XXXXXXXXXXXXXXXXXX
+        - name: project_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: tenant_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: repo_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: agent_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: environment
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by relation type
+        - name: max_depth
+          in: query
+          required: false
+          schema:
+            type: integer
+          example: 3
+        - name: valid_at
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Filter to relations valid at this point in time (RFC3339)
+      responses:
+        '200':
+          description: Relation results (may be empty array)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RelationResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/relations/to/{id}:
+    get:
+      operationId: getRelationsTo
+      summary: Relations pointing to a record
+      description: Traverses the graph inward to the given record ID up to max_depth hops.
+      tags: [Relations]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: 01JT3XXXXXXXXXXXXXXXXXX
+        - name: project_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: tenant_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: repo_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: agent_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: environment
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by relation type
+        - name: max_depth
+          in: query
+          required: false
+          schema:
+            type: integer
+          example: 3
+        - name: valid_at
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Filter to relations valid at this point in time (RFC3339)
+      responses:
+        '200':
+          description: Relation results (may be empty array)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RelationResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ── Search & Context ───────────────────────────────────────────────────────
+
+  /api/v1/search:
+    post:
+      operationId: search
+      summary: Full-text and ranking search
+      description: |
+        Executes a ranked search combining FTS, trigram similarity, recency boost,
+        importance score, and scope exactness. Returns results sorted by final_score
+        descending.
+      tags: [Retrieval]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchRequest'
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/search/context:
+    post:
+      operationId: buildContext
+      summary: Build a token-budgeted context bundle
+      description: |
+        Assembles the most relevant records for the given scope (optionally filtered
+        by query and types) into a structured bundle that fits within max_tokens.
+        Optionally expands the knowledge graph to include related records.
+      tags: [Retrieval]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContextRequest'
+      responses:
+        '200':
+          description: Context bundle
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContextBundle'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ── Purge ──────────────────────────────────────────────────────────────────
+
+  /api/v1/purge/request:
+    post:
+      operationId: requestPurge
+      summary: Request a hard purge
+      description: |
+        Creates a purge request for a given record. The request is queued in
+        pending status and must be explicitly executed via /purge/{id}/execute.
+        This two-step pattern allows audit review before irreversible deletion.
+      tags: [Purge]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PurgeRequest'
+      responses:
+        '201':
+          description: Purge request created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurgeRecord'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/purge/{id}/execute:
+    post:
+      operationId: executePurge
+      summary: Execute a queued purge
+      description: Executes a previously created purge request. Returns 409 if the request has already been executed.
+      tags: [Purge]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: 01JT3XXXXXXXXXXXXXXXXXX
+      responses:
+        '200':
+          description: Purge executed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurgeRecord'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ── Feedback ───────────────────────────────────────────────────────────────
+
+  /api/v1/feedback:
+    post:
+      operationId: submitFeedback
+      summary: Submit retrieval feedback
+      description: |
+        Records which results a caller selected from a search, used to tune
+        importance scores and retrieval ranking over time.
+      tags: [Feedback]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FeedbackRequest'
+      responses:
+        '201':
+          description: Feedback recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'

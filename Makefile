@@ -1,4 +1,4 @@
-.PHONY: test test-unit test-integration lint modernize
+.PHONY: test test-unit test-integration openapi-validate lint modernize
 
 test:
 	go test ./...
@@ -8,6 +8,9 @@ test-unit:
 
 test-integration:
 	go test ./test/integration/... -tags=integration -count=1
+
+openapi-validate:
+	go test ./test/openapi/... -count=1
 
 lint:
 	golangci-lint run ./...
