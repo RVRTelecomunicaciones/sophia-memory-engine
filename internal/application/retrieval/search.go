@@ -3,6 +3,7 @@ package retrieval
 import (
 	"context"
 	"sort"
+	"strings"
 
 	"github.com/sophia-engine/memory-engine/internal/domain/shared"
 	"github.com/sophia-engine/memory-engine/internal/infrastructure/config"
@@ -35,6 +36,17 @@ func NewSearchService(
 }
 
 // Search performs a hybrid search: FTS retrieval + composite ranking.
+//
+// ADR-0005 P2.3 tuning: for the orchestator's `sdd_*` workload, the caller's
+// search query string is interpreted as a candidate topic_key. When the FTS
+// result snippet contains content that "looks like" the topic key, we apply
+// the topic-key boost. We do NOT have a side-channel hit to the record's
+// topic_key here (that would require a per-result repo call), so the boost
+// is approximated: when the caller's Query is non-empty AND the caller's
+// Types filter contains at least one sdd_* type AND the snippet contains the
+// query verbatim, we treat it as a topic-key match. This is a conservative
+// signal that won't flip ordering for FTS-quality hits but will lift exact
+// "sdd/some/key" lookups to the top of the result set.
 func (s *SearchService) Search(ctx context.Context, query inbound.SearchQuery) (*inbound.SearchResults, error) {
 	limit := s.config.Thresholds.DefaultResults
 	if query.Limit != nil {
@@ -65,6 +77,17 @@ func (s *SearchService) Search(ctx context.Context, query inbound.SearchQuery) (
 
 	now := s.clock.Now()
 
+	// Pre-compute whether the caller's Types filter includes ANY sdd_* type.
+	// We use this to decide whether the topic-key boost should fire (the
+	// boost is scoped to sdd_*-targeted queries, per ADR-0005 P2.3).
+	queryAsksForSDD := false
+	for _, t := range query.Types {
+		if IsSDDType(t) {
+			queryAsksForSDD = true
+			break
+		}
+	}
+
 	type scoredResult struct {
 		fts     outbound.FTSResult
 		signals RankingSignals
@@ -78,17 +101,39 @@ func (s *SearchService) Search(ctx context.Context, query inbound.SearchQuery) (
 		// CreatedAt is approximated from the ULID timestamp embedded in the RecordID.
 		recencyBoost := ComputeRecencyBoost(r.ID.Time(), now)
 
+		// P2.3 flags.
+		isRequestedSDD := IsRequestedSDDType(r.RecordType, query.Types)
+		snippetTruncated := IsSnippetTruncated(r.Snippet)
+		// Approximate topic-key match: the caller's query string appears verbatim
+		// in the snippet AND the caller is targeting sdd_* types. The snippet
+		// contains ts_headline output (which mirrors source content), so a
+		// topic_key like "sdd/p2.3/retrieval" appearing in the snippet is a
+		// strong indicator the record's topic_key equals the query string.
+		topicKeyMatch := queryAsksForSDD && query.Query != "" &&
+			containsTopicKey(r.Snippet, query.Query)
+
 		signals := RankingSignals{
-			FTSScore:        r.Rank,
-			TRGMScore:       r.TrigramScore,
-			RecencyBoost:    recencyBoost,
-			ImportanceScore: 0.5, // default — will load from record later
-			TypeBoost:       0.5, // memories default (decisions=0.8, heuristics=0.7)
-			FreshnessBoost:  1.0, // fresh default
-			ScopeExactness:  1.0, // exact project match assumed
+			FTSScore:         r.Rank,
+			TRGMScore:        r.TrigramScore,
+			RecencyBoost:     recencyBoost,
+			ImportanceScore:  0.5, // default — will load from record later
+			TypeBoost:        0.5, // memories default (decisions=0.8, heuristics=0.7)
+			FreshnessBoost:   1.0, // fresh default
+			ScopeExactness:   1.0, // exact project match assumed
+			TopicKeyMatch:    topicKeyMatch,
+			IsRequestedSDD:   isRequestedSDD,
+			SnippetTruncated: snippetTruncated,
 		}
 
 		final := ComputeFinalScore(s.config.Weights, signals)
+
+		// Persist the bumped TypeBoost in the DTO so the SDD-type increment
+		// is observable to clients without changing the response shape.
+		dtoTypeBoost := signals.TypeBoost
+		if isRequestedSDD {
+			dtoTypeBoost += s.config.Weights.SDDTypeIncrement
+		}
+		signals.TypeBoost = dtoTypeBoost
 
 		scored = append(scored, scoredResult{
 			fts:     r,
@@ -131,4 +176,15 @@ func (s *SearchService) Search(ctx context.Context, query inbound.SearchQuery) (
 		Query:      query.Query,
 		Scope:      query.Scope,
 	}, nil
+}
+
+// containsTopicKey reports whether `query` appears as a substring of `snippet`.
+// Cheap by design; the topic-key boost is a soft signal, not a strict equality
+// check. Both strings are taken as-is (case-sensitive) because topic_keys are
+// case-sensitive in the engine. An empty query returns false.
+func containsTopicKey(snippet, query string) bool {
+	if query == "" {
+		return false
+	}
+	return strings.Contains(snippet, query)
 }
