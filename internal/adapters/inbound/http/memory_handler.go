@@ -225,6 +225,54 @@ func (h *MemoryHandler) Get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toMemoryResponse(record))
 }
 
+// GetByTopicKey handles GET /api/v1/memories/by-topic-key.
+//
+// Required query params: project_id, topic_key.
+// Optional scope refinements: tenant_id, repo_id, agent_id, session_id, environment.
+//
+// Returns the latest active memory record matching the criteria, or 404 when
+// no active record matches.
+func (h *MemoryHandler) GetByTopicKey(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+
+	projectID := q.Get("project_id")
+	topicKey := q.Get("topic_key")
+	if projectID == "" || topicKey == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "project_id and topic_key are required query params",
+		})
+		return
+	}
+
+	query := inbound.GetByTopicKeyQuery{
+		ProjectID: projectID,
+		TopicKey:  topicKey,
+	}
+	if v := q.Get("tenant_id"); v != "" {
+		query.TenantID = &v
+	}
+	if v := q.Get("repo_id"); v != "" {
+		query.RepoID = &v
+	}
+	if v := q.Get("agent_id"); v != "" {
+		query.AgentID = &v
+	}
+	if v := q.Get("session_id"); v != "" {
+		query.SessionID = &v
+	}
+	if v := q.Get("environment"); v != "" {
+		query.Environment = &v
+	}
+
+	record, err := h.svc.GetByTopicKey(r.Context(), query)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toMemoryResponse(record))
+}
+
 // Archive handles POST /api/v1/memories/{id}/archive.
 func (h *MemoryHandler) Archive(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
