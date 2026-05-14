@@ -14,6 +14,7 @@ import (
 	apphttp "github.com/sophia-engine/memory-engine/internal/adapters/inbound/http"
 	"github.com/sophia-engine/memory-engine/internal/adapters/outbound/persistence"
 	"github.com/sophia-engine/memory-engine/internal/adapters/outbound/search"
+	"github.com/sophia-engine/memory-engine/internal/application/authsvc"
 	"github.com/sophia-engine/memory-engine/internal/application/decisions"
 	"github.com/sophia-engine/memory-engine/internal/application/feedback"
 	"github.com/sophia-engine/memory-engine/internal/application/heuristics"
@@ -83,6 +84,7 @@ func main() {
 	heurRepo := persistence.NewHeuristicPgRepository(pool)
 	relRepo := persistence.NewRelationPgRepository(pool)
 	searchIdx := search.NewPostgresFTSIndex(pool)
+	apiKeyRepo := persistence.NewAPIKeyPgRepository(pool)
 
 	// Transaction manager.
 	txMgr := persistence.NewPgTxManager(pool)
@@ -98,9 +100,10 @@ func main() {
 	purgeSvc := security.NewService(purgeRepo, memRepo, relRepo, searchIdx, txMgr, eventPub, clock)
 	feedbackRepo := persistence.NewFeedbackPgRepository(pool)
 	feedbackSvc := feedback.NewService(feedbackRepo, eventPub, clock)
+	authSvc := authsvc.NewService(apiKeyRepo, clock)
 
 	// HTTP.
-	router := apphttp.NewRouter(memorySvc, decisionSvc, heuristicSvc, relationSvc, searchSvc, ctxBuilder, purgeSvc, feedbackSvc, pool)
+	router := apphttp.NewRouter(memorySvc, decisionSvc, heuristicSvc, relationSvc, searchSvc, ctxBuilder, purgeSvc, feedbackSvc, authSvc, pool)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	server := &gohttp.Server{

@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
+	"github.com/sophia-engine/memory-engine/internal/adapters/inbound/http/middleware"
 	"github.com/sophia-engine/memory-engine/internal/application/retrieval"
 	"github.com/sophia-engine/memory-engine/internal/ports/inbound"
 )
@@ -13,6 +14,8 @@ import (
 //
 // db is used only by the /ready endpoint to probe Postgres connectivity;
 // it reuses the application's pgxpool rather than opening a new connection.
+//
+// authSvc gates every route under /api/v1; /health and /ready stay public.
 func NewRouter(
 	memorySvc inbound.MemoryService,
 	decisionSvc inbound.DecisionService,
@@ -22,6 +25,7 @@ func NewRouter(
 	ctxBuilder *retrieval.ContextBuilder,
 	purgeSvc inbound.PurgeService,
 	feedbackSvc inbound.FeedbackService,
+	authSvc inbound.AuthService,
 	db DBPinger,
 ) chi.Router {
 	r := chi.NewRouter()
@@ -31,6 +35,8 @@ func NewRouter(
 	r.Use(RequestLogger)
 
 	r.Route("/api/v1", func(r chi.Router) {
+		// All /api/v1/* routes require a valid API key.
+		r.Use(middleware.APIKey(authSvc))
 		memHandler := NewMemoryHandler(memorySvc)
 		r.Post("/memories", memHandler.Ingest)
 		r.Get("/memories/by-topic-key", memHandler.GetByTopicKey)
