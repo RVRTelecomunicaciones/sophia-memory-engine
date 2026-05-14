@@ -74,10 +74,10 @@ func TestMemoryRepository_FindLatestActiveByTopicKey_ExcludesArchived(t *testing
 	// Newer but archived
 	newer := memoryFixture(t, "proj-1", "sdd/x/tasks", time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC))
 	require.NoError(t, repo.Save(ctx, newer))
-	require.NoError(t, repo.UpdateStatus(ctx, newer.ID, shared.MemoryStatusArchived))
 
 	scope, err := shared.NewScope("proj-1")
 	require.NoError(t, err)
+	require.NoError(t, repo.UpdateStatus(ctx, scope, newer.ID, shared.MemoryStatusArchived))
 
 	got, err := repo.FindLatestActiveByTopicKey(ctx, scope, "sdd/x/tasks")
 	require.NoError(t, err)
