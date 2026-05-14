@@ -104,7 +104,7 @@ func TestUpsert_ExistingTopicKey_SameScope_UpdatesInPlace(t *testing.T) {
 	assert.Equal(t, 1, countActiveByTopicKey(t, ctx, pool, sc.ProjectID, "sdd/bar"))
 
 	// Content is the latest write.
-	got, err := repo.FindActiveByTopicKey(ctx, sc, "sdd/bar")
+	got, err := repo.FindLatestActiveByTopicKey(ctx, sc, "sdd/bar")
 	require.NoError(t, err)
 	assert.Equal(t, "v2 content", got.Content)
 
@@ -257,7 +257,7 @@ func TestUpsert_Concurrent_ProducesSingleRow(t *testing.T) {
 
 	// Content is the last-write-wins survivor; we don't know which goroutine
 	// won, but the content MUST be one of the worker contents.
-	rec, err := repo.FindActiveByTopicKey(ctx, sc, "sdd/concurrent")
+	rec, err := repo.FindLatestActiveByTopicKey(ctx, sc, "sdd/concurrent")
 	require.NoError(t, err)
 	assert.Regexp(t, `^worker-\d{2}$`, rec.Content)
 }

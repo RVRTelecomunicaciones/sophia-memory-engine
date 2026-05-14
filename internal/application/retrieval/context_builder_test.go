@@ -52,7 +52,7 @@ func (m *mockMemoryRepo) UpsertByTopicKey(_ context.Context, rec *memory.MemoryR
 func (m *mockMemoryRepo) FindByID(_ context.Context, _ shared.Scope, _ shared.RecordID) (*memory.MemoryRecord, error) {
 	return m.findResult, m.findErr
 }
-func (m *mockMemoryRepo) FindActiveByTopicKey(_ context.Context, _ shared.Scope, _ string) (*memory.MemoryRecord, error) {
+func (m *mockMemoryRepo) FindLatestActiveByTopicKey(_ context.Context, _ shared.Scope, _ string) (*memory.MemoryRecord, error) {
 	return nil, shared.ErrNotFound
 }
 func (m *mockMemoryRepo) UpdateStatus(_ context.Context, _ shared.Scope, _ shared.RecordID, _ shared.MemoryStatus) error {

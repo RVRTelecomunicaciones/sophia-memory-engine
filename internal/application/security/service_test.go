@@ -66,7 +66,7 @@ func (m *mockMemoryRepo) FindByID(ctx context.Context, scope shared.Scope, id sh
 	}
 	return nil, shared.ErrNotFound
 }
-func (m *mockMemoryRepo) FindActiveByTopicKey(_ context.Context, _ shared.Scope, _ string) (*memory.MemoryRecord, error) {
+func (m *mockMemoryRepo) FindLatestActiveByTopicKey(_ context.Context, _ shared.Scope, _ string) (*memory.MemoryRecord, error) {
 	return nil, shared.ErrNotFound
 }
 func (m *mockMemoryRepo) UpdateStatus(_ context.Context, _ shared.Scope, _ shared.RecordID, _ shared.MemoryStatus) error {
