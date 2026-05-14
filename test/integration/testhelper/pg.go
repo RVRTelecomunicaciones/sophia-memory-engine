@@ -30,8 +30,11 @@ const envExternalDSN = "MEMORY_ENGINE_TEST_DSN"
 //   - Otherwise, it starts a fresh Postgres 16 container via testcontainers
 //     and applies the SQL migrations directly (developer laptop path).
 //
+// Accepts testing.TB so benchmarks (*testing.B) and parallel sub-tests can
+// share the helper. Callers retain the standard *testing.T idioms.
+//
 // The pool is closed automatically when the test finishes.
-func SetupTestDB(t *testing.T) *pgxpool.Pool {
+func SetupTestDB(t testing.TB) *pgxpool.Pool {
 	t.Helper()
 	ctx := context.Background()
 
@@ -87,7 +90,7 @@ func SetupTestDB(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-func runMigrations(t *testing.T, pool *pgxpool.Pool) {
+func runMigrations(t testing.TB, pool *pgxpool.Pool) {
 	t.Helper()
 	migPath := findMigrationPath(t)
 
@@ -109,7 +112,7 @@ func runMigrations(t *testing.T, pool *pgxpool.Pool) {
 	}
 }
 
-func findMigrationPath(t *testing.T) string {
+func findMigrationPath(t testing.TB) string {
 	t.Helper()
 	candidates := []string{
 		"../../migrations/postgres",

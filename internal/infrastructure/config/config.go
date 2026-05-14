@@ -38,8 +38,28 @@ type RetrievalConfig struct {
 	ContextBudget ContextBudgetConfig
 }
 
-// RankingWeights defines the 7 signals for hybrid retrieval scoring.
-// Weights must sum to 1.0.
+// RankingWeights defines the signals for hybrid retrieval scoring.
+//
+// The first 7 weighted signals (FTS..ScopeExactness) form the linear-combination
+// base score; they should approximately sum to 1.0.
+//
+// The remaining 3 factors (ADR-0005 P2.3 — sdd_* workload tuning) are NOT
+// summed into the base score: they are applied AFTER the base score is
+// computed.
+//
+//   - TopicKeyBoost: multiplicative boost when the query's topic_key matches the
+//     record's topic_key exactly. Default 1.5×.
+//   - SDDTypeIncrement: additive bump on TypeBoost when the record's type starts
+//     with "sdd_" AND that type was explicitly requested in the search filter.
+//     This is INCREMENTAL to TypeBoost — it does not replace it. Default 0.10.
+//   - TruncatedSnippetPenalty: multiplicative penalty applied to the final score
+//     when the snippet contains the ts_headline truncation marker ("..."). The
+//     orchestator prefers long-form full-content hits over fragmented ones.
+//     Default 0.85×.
+//
+// These factors are observable through the final score and through the
+// (already exposed) TypeBoost component; no new DTO fields are added — public
+// API shape is preserved.
 type RankingWeights struct {
 	FTS            float64
 	Trigram        float64
@@ -48,6 +68,11 @@ type RankingWeights struct {
 	TypeBoost      float64
 	Freshness      float64
 	ScopeExactness float64
+
+	// Post-composition factors (ADR-0005 P2.3).
+	TopicKeyBoost           float64
+	SDDTypeIncrement        float64
+	TruncatedSnippetPenalty float64
 }
 
 // RetrievalThresholds defines minimum scores and limits for retrieval.
@@ -103,6 +128,11 @@ func DefaultConfig() AppConfig {
 				TypeBoost:      0.10,
 				Freshness:      0.10,
 				ScopeExactness: 0.15,
+
+				// ADR-0005 P2.3 — sdd_* workload tuning.
+				TopicKeyBoost:           1.5,
+				SDDTypeIncrement:        0.10,
+				TruncatedSnippetPenalty: 0.85,
 			},
 			Thresholds: RetrievalThresholds{
 				MinTrigramSimilarity: 0.3,
