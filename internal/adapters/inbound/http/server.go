@@ -10,6 +10,9 @@ import (
 )
 
 // NewRouter creates the HTTP router with all routes wired.
+//
+// db is used only by the /ready endpoint to probe Postgres connectivity;
+// it reuses the application's pgxpool rather than opening a new connection.
 func NewRouter(
 	memorySvc inbound.MemoryService,
 	decisionSvc inbound.DecisionService,
@@ -19,6 +22,7 @@ func NewRouter(
 	ctxBuilder *retrieval.ContextBuilder,
 	purgeSvc inbound.PurgeService,
 	feedbackSvc inbound.FeedbackService,
+	db DBPinger,
 ) chi.Router {
 	r := chi.NewRouter()
 	r.Use(chiMiddleware.RequestID)
@@ -65,6 +69,9 @@ func NewRouter(
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+
+	readyHandler := NewReadyHandler(db)
+	r.Get("/ready", readyHandler.Ready)
 
 	return r
 }
