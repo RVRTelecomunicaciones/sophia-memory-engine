@@ -64,7 +64,7 @@ func (noopMemorySvc) Ingest(_ context.Context, _ inbound.IngestMemoryCmd) (*inbo
 func (noopMemorySvc) Get(_ context.Context, _ shared.RecordID) (*memory.MemoryRecord, error) {
 	return nil, nil
 }
-func (noopMemorySvc) GetByTopicKey(_ context.Context, _, _ string) (*memory.MemoryRecord, error) {
+func (noopMemorySvc) GetByTopicKey(_ context.Context, _ inbound.GetByTopicKeyQuery) (*memory.MemoryRecord, error) {
 	return nil, nil
 }
 func (noopMemorySvc) Archive(_ context.Context, _ inbound.ArchiveMemoryCmd) error { return nil }

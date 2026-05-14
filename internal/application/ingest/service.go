@@ -171,40 +171,60 @@ func (s *Service) Get(ctx context.Context, id shared.RecordID) (*memory.MemoryRe
 	return rec, nil
 }
 
-// GetByTopicKey retrieves the unique active memory record for the given
-// project_id + topic_key. The auth scope (when present) MUST match the
-// requested project_id or the repo lookup will return ErrNotFound (existence
-// leak prevention — see ADR-0005 §P1.5).
+// GetByTopicKey retrieves the active memory record matching the given topic
+// key within the requested scope. Validates that ProjectID and TopicKey are
+// non-empty, applies the P1.5 cross-project guard (auth scope project_id
+// MUST match the requested project_id, else ErrNotFound — existence leak
+// prevention per ADR-0005 §P1.5), then delegates to the repository.
 //
-// projectID is required because topic_key uniqueness is scoped per project.
-func (s *Service) GetByTopicKey(ctx context.Context, projectID, topicKey string) (*memory.MemoryRecord, error) {
-	if projectID == "" {
-		return nil, shared.NewValidationError(shared.FieldError{
-			Field:   "project_id",
-			Message: "required",
-		})
+// Post-migration-004 the (project_id, tenant_id, topic_key) tuple is unique
+// among active rows; the optional scope refinements (repo_id, agent_id,
+// session_id, environment) are extra filter predicates, not part of the
+// uniqueness key.
+func (s *Service) GetByTopicKey(ctx context.Context, query inbound.GetByTopicKeyQuery) (*memory.MemoryRecord, error) {
+	var fields []shared.FieldError
+	if query.ProjectID == "" {
+		fields = append(fields, shared.FieldError{Field: "project_id", Message: "required"})
 	}
-	if topicKey == "" {
-		return nil, shared.NewValidationError(shared.FieldError{
-			Field:   "topic_key",
-			Message: "required",
-		})
+	if query.TopicKey == "" {
+		fields = append(fields, shared.FieldError{Field: "topic_key", Message: "required"})
+	}
+	if len(fields) > 0 {
+		return nil, shared.NewValidationError(fields...)
 	}
 
-	scope := scopeFromCtxOrEmpty(ctx)
-	// If auth is present, the requested project must match. Otherwise build
-	// a scope from the requested project_id (internal flows / tests with no
-	// auth context).
-	if _, ok := authScope(ctx); ok {
-		if scope.ProjectID != projectID {
-			// Cross-project lookup masquerades as not-found.
+	// P1.5 guard: when an auth context is present, the requested project_id
+	// MUST match the auth scope. Cross-project lookups masquerade as
+	// ErrNotFound to prevent existence leaks.
+	if authedScope, ok := authScope(ctx); ok {
+		if authedScope.ProjectID != query.ProjectID {
 			return nil, shared.ErrNotFound
 		}
-	} else {
-		scope = shared.Scope{ProjectID: projectID}
 	}
 
-	rec, err := s.memRepo.FindActiveByTopicKey(ctx, scope, topicKey)
+	var opts []shared.ScopeOption
+	if query.TenantID != nil {
+		opts = append(opts, shared.WithTenantID(*query.TenantID))
+	}
+	if query.RepoID != nil {
+		opts = append(opts, shared.WithRepoID(*query.RepoID))
+	}
+	if query.AgentID != nil {
+		opts = append(opts, shared.WithAgentID(*query.AgentID))
+	}
+	if query.SessionID != nil {
+		opts = append(opts, shared.WithSessionID(*query.SessionID))
+	}
+	if query.Environment != nil {
+		opts = append(opts, shared.WithEnvironment(*query.Environment))
+	}
+
+	scope, err := shared.NewScope(query.ProjectID, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("ingest: get_by_topic_key scope: %w", err)
+	}
+
+	rec, err := s.memRepo.FindLatestActiveByTopicKey(ctx, scope, query.TopicKey)
 	if err != nil {
 		return nil, fmt.Errorf("ingest: get_by_topic_key: %w", err)
 	}
