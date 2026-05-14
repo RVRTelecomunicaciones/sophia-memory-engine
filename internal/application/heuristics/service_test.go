@@ -22,10 +22,10 @@ import (
 
 type mockHeuristicRepo struct {
 	saveFunc            func(ctx context.Context, rule *heuristic.HeuristicRule) error
-	findByIDFunc        func(ctx context.Context, id shared.RecordID) (*heuristic.HeuristicRule, error)
+	findByIDFunc        func(ctx context.Context, scope shared.Scope, id shared.RecordID) (*heuristic.HeuristicRule, error)
 	findActiveByKeyFunc func(ctx context.Context, key string, scope shared.Scope) (*heuristic.HeuristicRule, error)
 	findByScopeFunc     func(ctx context.Context, scope shared.Scope, enabled *bool) ([]heuristic.HeuristicRule, error)
-	updateEnabledFunc   func(ctx context.Context, id shared.RecordID, enabled bool) error
+	updateEnabledFunc   func(ctx context.Context, scope shared.Scope, id shared.RecordID, enabled bool) error
 	saved               []*heuristic.HeuristicRule
 	disabledIDs         []shared.RecordID
 }
@@ -38,9 +38,9 @@ func (m *mockHeuristicRepo) Save(ctx context.Context, rule *heuristic.HeuristicR
 	return nil
 }
 
-func (m *mockHeuristicRepo) FindByID(ctx context.Context, id shared.RecordID) (*heuristic.HeuristicRule, error) {
+func (m *mockHeuristicRepo) FindByID(ctx context.Context, scope shared.Scope, id shared.RecordID) (*heuristic.HeuristicRule, error) {
 	if m.findByIDFunc != nil {
-		return m.findByIDFunc(ctx, id)
+		return m.findByIDFunc(ctx, scope, id)
 	}
 	return nil, shared.ErrNotFound
 }
@@ -59,12 +59,12 @@ func (m *mockHeuristicRepo) FindByScope(ctx context.Context, scope shared.Scope,
 	return nil, nil
 }
 
-func (m *mockHeuristicRepo) UpdateEnabled(ctx context.Context, id shared.RecordID, enabled bool) error {
+func (m *mockHeuristicRepo) UpdateEnabled(ctx context.Context, scope shared.Scope, id shared.RecordID, enabled bool) error {
 	if !enabled {
 		m.disabledIDs = append(m.disabledIDs, id)
 	}
 	if m.updateEnabledFunc != nil {
-		return m.updateEnabledFunc(ctx, id, enabled)
+		return m.updateEnabledFunc(ctx, scope, id, enabled)
 	}
 	return nil
 }
@@ -331,7 +331,7 @@ func TestHeuristicService_Toggle_Enable_Conflict(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	repo.findByIDFunc = func(_ context.Context, id shared.RecordID) (*heuristic.HeuristicRule, error) {
+	repo.findByIDFunc = func(_ context.Context, _ shared.Scope, id shared.RecordID) (*heuristic.HeuristicRule, error) {
 		if id.Equal(targetRule.ID) {
 			return targetRule, nil
 		}
@@ -361,7 +361,7 @@ func TestHeuristicService_Toggle_Disable(t *testing.T) {
 
 	var updatedID shared.RecordID
 	var updatedEnabled bool
-	repo.updateEnabledFunc = func(_ context.Context, id shared.RecordID, enabled bool) error {
+	repo.updateEnabledFunc = func(_ context.Context, _ shared.Scope, id shared.RecordID, enabled bool) error {
 		updatedID = id
 		updatedEnabled = enabled
 		return nil

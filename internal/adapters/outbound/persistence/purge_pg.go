@@ -67,9 +67,13 @@ func (r *PurgePgRepository) Save(ctx context.Context, record *purge.PurgeRecord)
 	return err
 }
 
-// FindByID retrieves a PurgeRecord by its ID.
-// Returns shared.ErrNotFound if the record does not exist.
-func (r *PurgePgRepository) FindByID(ctx context.Context, id shared.RecordID) (*purge.PurgeRecord, error) {
+// FindByID retrieves a PurgeRecord by its ID within the given scope.
+// Returns shared.ErrNotFound if the record does not exist OR belongs to a
+// different project (cross-project reads look identical to missing rows).
+//
+// Scope: scope is provided by the application layer from the auth context.
+// Tenant predicate: NULL tenant on the row is visible to any key in the project.
+func (r *PurgePgRepository) FindByID(ctx context.Context, scope shared.Scope, id shared.RecordID) (*purge.PurgeRecord, error) {
 	conn := getConn(ctx, r.pool)
 
 	const query = `
@@ -80,9 +84,11 @@ func (r *PurgePgRepository) FindByID(ctx context.Context, id shared.RecordID) (*
 			executed_at, error_detail,
 			created_at, updated_at
 		FROM purge_records
-		WHERE id = $1`
+		WHERE id = $1
+		  AND project_id = $2
+		  AND (tenant_id IS NULL OR tenant_id = $3)`
 
-	row := conn.QueryRow(ctx, query, id.String())
+	row := conn.QueryRow(ctx, query, id.String(), scope.ProjectID, scope.TenantID)
 
 	var (
 		idStr        string
@@ -148,9 +154,12 @@ func (r *PurgePgRepository) FindByID(ctx context.Context, id shared.RecordID) (*
 	return &rec, nil
 }
 
-// UpdateStatus updates the status and artifacts of a purge record.
-// Returns shared.ErrNotFound if the record does not exist.
-func (r *PurgePgRepository) UpdateStatus(ctx context.Context, id shared.RecordID, status shared.PurgeStatus, artifacts *purge.PurgedArtifacts) error {
+// UpdateStatus updates the status and artifacts of a scoped purge record.
+// Returns shared.ErrNotFound if the record does not exist within scope
+// (including cross-project access — the two cases are indistinguishable).
+//
+// Scope: scope is provided by the application layer from the auth context.
+func (r *PurgePgRepository) UpdateStatus(ctx context.Context, scope shared.Scope, id shared.RecordID, status shared.PurgeStatus, artifacts *purge.PurgedArtifacts) error {
 	conn := getConn(ctx, r.pool)
 
 	var artifactsArg any
@@ -168,9 +177,11 @@ func (r *PurgePgRepository) UpdateStatus(ctx context.Context, id shared.RecordID
 			artifacts_purged = $2,
 			executed_at = CASE WHEN $1 = 'executed' THEN NOW() ELSE executed_at END,
 			updated_at = NOW()
-		WHERE id = $3`
+		WHERE id = $3
+		  AND project_id = $4
+		  AND (tenant_id IS NULL OR tenant_id = $5)`
 
-	tag, err := conn.Exec(ctx, query, string(status), artifactsArg, id.String())
+	tag, err := conn.Exec(ctx, query, string(status), artifactsArg, id.String(), scope.ProjectID, scope.TenantID)
 	if err != nil {
 		return err
 	}

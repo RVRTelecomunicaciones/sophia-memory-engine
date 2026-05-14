@@ -38,10 +38,30 @@ type TraverseResult struct {
 }
 
 // RelationRepository persists and retrieves typed directed relations between entities.
+//
+// Scope enforcement contract:
+//   - Save: scope is embedded in rel.Scope; application layer asserts it matches
+//     auth scope before calling Save.
+//   - FindFromSource, FindToTarget: require explicit auth-derived scope so the SQL
+//     layer adds "AND project_id = $N AND (tenant_id IS NULL OR tenant_id = $M)".
+//   - Traverse: scope is passed via TraverseQuery.Scope and enforced in SQL.
+//   - DeleteByTarget: requires scope so a purge of project-A's record cannot
+//     accidentally delete project-B's relations even when given a known ID.
 type RelationRepository interface {
+	// Save persists a new relation. Scope is embedded in rel.Scope.
 	Save(ctx context.Context, rel *relation.Relation) error
-	FindFromSource(ctx context.Context, sourceID shared.RecordID, relType *shared.RelationType) ([]relation.Relation, error)
-	FindToTarget(ctx context.Context, targetID shared.RecordID, relType *shared.RelationType) ([]relation.Relation, error)
+
+	// FindFromSource returns all relations from sourceID within authScope.
+	FindFromSource(ctx context.Context, scope shared.Scope, sourceID shared.RecordID, relType *shared.RelationType) ([]relation.Relation, error)
+
+	// FindToTarget returns all relations pointing to targetID within authScope.
+	FindToTarget(ctx context.Context, scope shared.Scope, targetID shared.RecordID, relType *shared.RelationType) ([]relation.Relation, error)
+
+	// Traverse performs a recursive graph traversal. Scope is carried in query.Scope.
 	Traverse(ctx context.Context, query TraverseQuery) ([]TraverseResult, error)
-	DeleteByTarget(ctx context.Context, targetID shared.RecordID) (int, error)
+
+	// DeleteByTarget removes all relations for targetID within authScope.
+	// Purge flows use the auth context's scope (the scope of the purge record),
+	// regardless of the target's own scope, to prevent cross-project deletion.
+	DeleteByTarget(ctx context.Context, scope shared.Scope, targetID shared.RecordID) (int, error)
 }

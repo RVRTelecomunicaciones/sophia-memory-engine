@@ -3,6 +3,7 @@ package security
 import (
 	"context"
 
+	"github.com/sophia-engine/memory-engine/internal/domain/auth"
 	"github.com/sophia-engine/memory-engine/internal/domain/purge"
 	"github.com/sophia-engine/memory-engine/internal/domain/shared"
 	"github.com/sophia-engine/memory-engine/internal/ports/inbound"
@@ -44,11 +45,31 @@ func NewService(
 	}
 }
 
+// scopeFromCtx derives the auth-derived scope from the request context.
+func scopeFromCtx(ctx context.Context) shared.Scope {
+	ac, ok := auth.FromContext(ctx)
+	if !ok {
+		return shared.Scope{}
+	}
+	s := shared.Scope{ProjectID: ac.ProjectID}
+	if ac.TenantID != "" {
+		s.TenantID = &ac.TenantID
+	}
+	return s
+}
+
 // Request creates a new purge request for the given target.
 // Phase 1: only memory targets are supported.
+//
+// Scope: the target memory record is fetched within the auth scope (FindByID
+// enforces project isolation). If the target does not belong to the auth scope
+// the fetch returns ErrNotFound, preventing existence leaks.
 func (s *Service) Request(ctx context.Context, cmd inbound.RequestPurgeCmd) (*purge.PurgeRecord, error) {
-	// Phase 1: look up the target in the memory repo to determine type and scope.
-	mem, err := s.memRepo.FindByID(ctx, cmd.TargetID)
+	authS := scopeFromCtx(ctx)
+
+	// Phase 1: look up the target in the memory repo (scoped) to determine type and scope.
+	// If the target belongs to a different project, FindByID returns ErrNotFound.
+	mem, err := s.memRepo.FindByID(ctx, authS, cmd.TargetID)
 	if err != nil {
 		return nil, err
 	}
@@ -83,8 +104,14 @@ func (s *Service) Request(ctx context.Context, cmd inbound.RequestPurgeCmd) (*pu
 }
 
 // Execute performs the atomic purge execution: wipes content, removes FTS, deletes relations.
+//
+// Scope: the purge record is fetched within the auth scope. The wipe and relation
+// deletion operations use the purge record's scope (set at request time) as the
+// boundary — this preserves the audit chain and prevents cross-project wipes.
 func (s *Service) Execute(ctx context.Context, cmd inbound.ExecutePurgeCmd) (*purge.PurgeRecord, error) {
-	record, err := s.purgeRepo.FindByID(ctx, cmd.PurgeID)
+	authS := scopeFromCtx(ctx)
+
+	record, err := s.purgeRepo.FindByID(ctx, authS, cmd.PurgeID)
 	if err != nil {
 		return nil, err
 	}
@@ -93,10 +120,16 @@ func (s *Service) Execute(ctx context.Context, cmd inbound.ExecutePurgeCmd) (*pu
 		return nil, err
 	}
 
+	// purgeScope is the scope stored in the purge record (set at Request time,
+	// validated against the auth context at that point). Use it for all write
+	// operations so the audit chain is consistent even if the executor key has
+	// a different (but still valid) scope.
+	purgeScope := record.Scope
+
 	var artifacts purge.PurgedArtifacts
 
 	txErr := s.txMgr.WithTx(ctx, func(txCtx context.Context) error {
-		if err := s.memRepo.WipeContent(txCtx, record.TargetID); err != nil {
+		if err := s.memRepo.WipeContent(txCtx, purgeScope, record.TargetID); err != nil {
 			return err
 		}
 
@@ -104,7 +137,7 @@ func (s *Service) Execute(ctx context.Context, cmd inbound.ExecutePurgeCmd) (*pu
 			return err
 		}
 
-		relCount, err := s.relRepo.DeleteByTarget(txCtx, record.TargetID)
+		relCount, err := s.relRepo.DeleteByTarget(txCtx, purgeScope, record.TargetID)
 		if err != nil {
 			return err
 		}
@@ -119,12 +152,12 @@ func (s *Service) Execute(ctx context.Context, cmd inbound.ExecutePurgeCmd) (*pu
 			return err
 		}
 
-		return s.purgeRepo.UpdateStatus(txCtx, record.ID, shared.PurgeStatusExecuted, &artifacts)
+		return s.purgeRepo.UpdateStatus(txCtx, purgeScope, record.ID, shared.PurgeStatusExecuted, &artifacts)
 	})
 
 	if txErr != nil {
 		record.MarkFailed(txErr.Error())
-		_ = s.purgeRepo.UpdateStatus(ctx, record.ID, shared.PurgeStatusFailed, nil)
+		_ = s.purgeRepo.UpdateStatus(ctx, purgeScope, record.ID, shared.PurgeStatusFailed, nil)
 		return record, txErr
 	}
 

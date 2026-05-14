@@ -23,7 +23,14 @@ func writeError(w http.ResponseWriter, err error) {
 	}
 
 	switch {
+	case errors.Is(err, shared.ErrScopeForbidden):
+		// Cross-project write attempt detected at the application layer.
+		// The body intentionally omits which field mismatched to prevent
+		// information leakage (OWASP A01:2021 — Broken Access Control).
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 	case errors.Is(err, shared.ErrNotFound):
+		// Cross-project reads return ErrNotFound (not 403) to prevent
+		// existence leaks (ADR-0005 §P1.5 — locked decision 3).
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 	case errors.Is(err, shared.ErrPurged):
 		writeJSON(w, http.StatusGone, map[string]string{"error": err.Error()})

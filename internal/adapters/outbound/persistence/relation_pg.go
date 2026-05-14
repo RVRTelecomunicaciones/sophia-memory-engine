@@ -156,8 +156,12 @@ func scanRelation(rows pgx.Rows) (relation.Relation, error) {
 	return rel, nil
 }
 
-// FindFromSource returns all relations originating from the given source, optionally filtered by type.
-func (r *RelationPgRepository) FindFromSource(ctx context.Context, sourceID shared.RecordID, relType *shared.RelationType) ([]relation.Relation, error) {
+// FindFromSource returns all relations originating from sourceID within authScope,
+// optionally filtered by type.
+//
+// Scope: scope is provided by the application layer from the auth context.
+// Tenant predicate: NULL tenant on the row is visible to any key in the project.
+func (r *RelationPgRepository) FindFromSource(ctx context.Context, scope shared.Scope, sourceID shared.RecordID, relType *shared.RelationType) ([]relation.Relation, error) {
 	conn := getConn(ctx, r.pool)
 
 	const query = `
@@ -166,7 +170,9 @@ func (r *RelationPgRepository) FindFromSource(ctx context.Context, sourceID shar
 		       valid_from, valid_until, created_at, updated_at
 		FROM relations
 		WHERE source_id = $1
-		  AND ($2::varchar IS NULL OR relation_type = $2)
+		  AND project_id = $2
+		  AND (tenant_id IS NULL OR tenant_id = $3)
+		  AND ($4::varchar IS NULL OR relation_type = $4)
 		ORDER BY created_at DESC`
 
 	var typeStr *string
@@ -175,7 +181,7 @@ func (r *RelationPgRepository) FindFromSource(ctx context.Context, sourceID shar
 		typeStr = &s
 	}
 
-	rows, err := conn.Query(ctx, query, sourceID.String(), typeStr)
+	rows, err := conn.Query(ctx, query, sourceID.String(), scope.ProjectID, scope.TenantID, typeStr)
 	if err != nil {
 		return nil, err
 	}
@@ -197,8 +203,12 @@ func (r *RelationPgRepository) FindFromSource(ctx context.Context, sourceID shar
 	return results, nil
 }
 
-// FindToTarget returns all relations pointing to the given target, optionally filtered by type.
-func (r *RelationPgRepository) FindToTarget(ctx context.Context, targetID shared.RecordID, relType *shared.RelationType) ([]relation.Relation, error) {
+// FindToTarget returns all relations pointing to targetID within authScope,
+// optionally filtered by type.
+//
+// Scope: scope is provided by the application layer from the auth context.
+// Tenant predicate: NULL tenant on the row is visible to any key in the project.
+func (r *RelationPgRepository) FindToTarget(ctx context.Context, scope shared.Scope, targetID shared.RecordID, relType *shared.RelationType) ([]relation.Relation, error) {
 	conn := getConn(ctx, r.pool)
 
 	const query = `
@@ -207,7 +217,9 @@ func (r *RelationPgRepository) FindToTarget(ctx context.Context, targetID shared
 		       valid_from, valid_until, created_at, updated_at
 		FROM relations
 		WHERE target_id = $1
-		  AND ($2::varchar IS NULL OR relation_type = $2)
+		  AND project_id = $2
+		  AND (tenant_id IS NULL OR tenant_id = $3)
+		  AND ($4::varchar IS NULL OR relation_type = $4)
 		ORDER BY created_at DESC`
 
 	var typeStr *string
@@ -216,7 +228,7 @@ func (r *RelationPgRepository) FindToTarget(ctx context.Context, targetID shared
 		typeStr = &s
 	}
 
-	rows, err := conn.Query(ctx, query, targetID.String(), typeStr)
+	rows, err := conn.Query(ctx, query, targetID.String(), scope.ProjectID, scope.TenantID, typeStr)
 	if err != nil {
 		return nil, err
 	}
@@ -558,13 +570,22 @@ WITH RECURSIVE graph AS (
 	return results, nil
 }
 
-// DeleteByTarget removes all relations where the given ID appears as source or target.
-func (r *RelationPgRepository) DeleteByTarget(ctx context.Context, targetID shared.RecordID) (int, error) {
+// DeleteByTarget removes all relations for targetID within authScope.
+//
+// Scope: scope is provided by the application layer from the purge record's scope,
+// which was validated against the auth context at request time. This ensures
+// a project-A key cannot purge relations belonging to project-B.
+// Tenant predicate: NULL tenant on the row is visible to any key in the project.
+func (r *RelationPgRepository) DeleteByTarget(ctx context.Context, scope shared.Scope, targetID shared.RecordID) (int, error) {
 	conn := getConn(ctx, r.pool)
 
-	const query = `DELETE FROM relations WHERE source_id = $1 OR target_id = $1`
+	const query = `
+		DELETE FROM relations
+		WHERE (source_id = $1 OR target_id = $1)
+		  AND project_id = $2
+		  AND (tenant_id IS NULL OR tenant_id = $3)`
 
-	tag, err := conn.Exec(ctx, query, targetID.String())
+	tag, err := conn.Exec(ctx, query, targetID.String(), scope.ProjectID, scope.TenantID)
 	if err != nil {
 		return 0, err
 	}

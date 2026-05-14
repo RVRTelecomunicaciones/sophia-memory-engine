@@ -79,9 +79,14 @@ func (r *HeuristicPgRepository) Save(ctx context.Context, rule *heuristic.Heuris
 	return err
 }
 
-// FindByID retrieves a HeuristicRule by its ID.
-// Returns shared.ErrNotFound if the record does not exist.
-func (r *HeuristicPgRepository) FindByID(ctx context.Context, id shared.RecordID) (*heuristic.HeuristicRule, error) {
+// FindByID retrieves a HeuristicRule by its ID within the given scope.
+// Returns shared.ErrNotFound if the record does not exist OR belongs to a
+// different project (cross-project reads look identical to missing rows).
+//
+// Scope: scope is provided by the application layer from the auth context.
+// Tenant predicate: NULL tenant on the row is visible to any key in the project
+// (legacy / cross-tenant rows). A non-NULL tenant must match exactly.
+func (r *HeuristicPgRepository) FindByID(ctx context.Context, scope shared.Scope, id shared.RecordID) (*heuristic.HeuristicRule, error) {
 	conn := getConn(ctx, r.pool)
 
 	const query = `
@@ -94,9 +99,11 @@ func (r *HeuristicPgRepository) FindByID(ctx context.Context, id shared.RecordID
 			valid_from, valid_until, last_accessed, freshness,
 			created_at, updated_at
 		FROM heuristics
-		WHERE id = $1`
+		WHERE id = $1
+		  AND project_id = $2
+		  AND (tenant_id IS NULL OR tenant_id = $3)`
 
-	row := conn.QueryRow(ctx, query, id.String())
+	row := conn.QueryRow(ctx, query, id.String(), scope.ProjectID, scope.TenantID)
 	return scanHeuristicRule(row)
 }
 
@@ -308,14 +315,21 @@ func (r *HeuristicPgRepository) FindByScope(ctx context.Context, scope shared.Sc
 	return rules, nil
 }
 
-// UpdateEnabled sets the enabled flag on a heuristic rule.
-// Returns shared.ErrNotFound if the record does not exist.
-func (r *HeuristicPgRepository) UpdateEnabled(ctx context.Context, id shared.RecordID, enabled bool) error {
+// UpdateEnabled sets the enabled flag on a scoped heuristic rule.
+// Returns shared.ErrNotFound if the record does not exist within scope
+// (including cross-project access — the two cases are indistinguishable).
+//
+// Scope: scope is provided by the application layer from the auth context.
+func (r *HeuristicPgRepository) UpdateEnabled(ctx context.Context, scope shared.Scope, id shared.RecordID, enabled bool) error {
 	conn := getConn(ctx, r.pool)
 
-	const query = `UPDATE heuristics SET enabled = $1, updated_at = NOW() WHERE id = $2`
+	const query = `
+		UPDATE heuristics SET enabled = $1, updated_at = NOW()
+		WHERE id = $2
+		  AND project_id = $3
+		  AND (tenant_id IS NULL OR tenant_id = $4)`
 
-	tag, err := conn.Exec(ctx, query, enabled, id.String())
+	tag, err := conn.Exec(ctx, query, enabled, id.String(), scope.ProjectID, scope.TenantID)
 	if err != nil {
 		return err
 	}

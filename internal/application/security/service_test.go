@@ -24,8 +24,8 @@ import (
 
 type mockPurgeRepo struct {
 	saveFunc         func(ctx context.Context, record *purge.PurgeRecord) error
-	findByIDFunc     func(ctx context.Context, id shared.RecordID) (*purge.PurgeRecord, error)
-	updateStatusFunc func(ctx context.Context, id shared.RecordID, status shared.PurgeStatus, artifacts *purge.PurgedArtifacts) error
+	findByIDFunc     func(ctx context.Context, scope shared.Scope, id shared.RecordID) (*purge.PurgeRecord, error)
+	updateStatusFunc func(ctx context.Context, scope shared.Scope, id shared.RecordID, status shared.PurgeStatus, artifacts *purge.PurgedArtifacts) error
 	saved            []*purge.PurgeRecord
 }
 
@@ -37,62 +37,62 @@ func (m *mockPurgeRepo) Save(ctx context.Context, record *purge.PurgeRecord) err
 	return nil
 }
 
-func (m *mockPurgeRepo) FindByID(ctx context.Context, id shared.RecordID) (*purge.PurgeRecord, error) {
+func (m *mockPurgeRepo) FindByID(ctx context.Context, scope shared.Scope, id shared.RecordID) (*purge.PurgeRecord, error) {
 	if m.findByIDFunc != nil {
-		return m.findByIDFunc(ctx, id)
+		return m.findByIDFunc(ctx, scope, id)
 	}
 	return nil, shared.ErrNotFound
 }
 
-func (m *mockPurgeRepo) UpdateStatus(ctx context.Context, id shared.RecordID, status shared.PurgeStatus, artifacts *purge.PurgedArtifacts) error {
+func (m *mockPurgeRepo) UpdateStatus(ctx context.Context, scope shared.Scope, id shared.RecordID, status shared.PurgeStatus, artifacts *purge.PurgedArtifacts) error {
 	if m.updateStatusFunc != nil {
-		return m.updateStatusFunc(ctx, id, status, artifacts)
+		return m.updateStatusFunc(ctx, scope, id, status, artifacts)
 	}
 	return nil
 }
 
 type mockMemoryRepo struct {
-	findByIDFunc func(ctx context.Context, id shared.RecordID) (*memory.MemoryRecord, error)
-	wipeFunc     func(ctx context.Context, id shared.RecordID) error
+	findByIDFunc func(ctx context.Context, scope shared.Scope, id shared.RecordID) (*memory.MemoryRecord, error)
+	wipeFunc     func(ctx context.Context, scope shared.Scope, id shared.RecordID) error
 }
 
 func (m *mockMemoryRepo) Save(_ context.Context, _ *memory.MemoryRecord) error { return nil }
-func (m *mockMemoryRepo) FindByID(ctx context.Context, id shared.RecordID) (*memory.MemoryRecord, error) {
+func (m *mockMemoryRepo) FindByID(ctx context.Context, scope shared.Scope, id shared.RecordID) (*memory.MemoryRecord, error) {
 	if m.findByIDFunc != nil {
-		return m.findByIDFunc(ctx, id)
+		return m.findByIDFunc(ctx, scope, id)
 	}
 	return nil, shared.ErrNotFound
 }
 func (m *mockMemoryRepo) FindLatestActiveByTopicKey(_ context.Context, _ shared.Scope, _ string) (*memory.MemoryRecord, error) {
 	return nil, shared.ErrNotFound
 }
-func (m *mockMemoryRepo) UpdateStatus(_ context.Context, _ shared.RecordID, _ shared.MemoryStatus) error {
+func (m *mockMemoryRepo) UpdateStatus(_ context.Context, _ shared.Scope, _ shared.RecordID, _ shared.MemoryStatus) error {
 	return nil
 }
-func (m *mockMemoryRepo) WipeContent(ctx context.Context, id shared.RecordID) error {
+func (m *mockMemoryRepo) WipeContent(ctx context.Context, scope shared.Scope, id shared.RecordID) error {
 	if m.wipeFunc != nil {
-		return m.wipeFunc(ctx, id)
+		return m.wipeFunc(ctx, scope, id)
 	}
 	return nil
 }
 
 type mockRelationRepo struct {
-	deleteByTargetFunc func(ctx context.Context, targetID shared.RecordID) (int, error)
+	deleteByTargetFunc func(ctx context.Context, scope shared.Scope, targetID shared.RecordID) (int, error)
 }
 
 func (m *mockRelationRepo) Save(_ context.Context, _ *relation.Relation) error { return nil }
-func (m *mockRelationRepo) FindFromSource(_ context.Context, _ shared.RecordID, _ *shared.RelationType) ([]relation.Relation, error) {
+func (m *mockRelationRepo) FindFromSource(_ context.Context, _ shared.Scope, _ shared.RecordID, _ *shared.RelationType) ([]relation.Relation, error) {
 	return nil, nil
 }
-func (m *mockRelationRepo) FindToTarget(_ context.Context, _ shared.RecordID, _ *shared.RelationType) ([]relation.Relation, error) {
+func (m *mockRelationRepo) FindToTarget(_ context.Context, _ shared.Scope, _ shared.RecordID, _ *shared.RelationType) ([]relation.Relation, error) {
 	return nil, nil
 }
 func (m *mockRelationRepo) Traverse(_ context.Context, _ outbound.TraverseQuery) ([]outbound.TraverseResult, error) {
 	return nil, nil
 }
-func (m *mockRelationRepo) DeleteByTarget(ctx context.Context, targetID shared.RecordID) (int, error) {
+func (m *mockRelationRepo) DeleteByTarget(ctx context.Context, scope shared.Scope, targetID shared.RecordID) (int, error) {
 	if m.deleteByTargetFunc != nil {
-		return m.deleteByTargetFunc(ctx, targetID)
+		return m.deleteByTargetFunc(ctx, scope, targetID)
 	}
 	return 0, nil
 }
@@ -211,7 +211,7 @@ func TestPurgeService_Request_Success(t *testing.T) {
 	deps := newTestService()
 	mem := newTestMemory(t)
 
-	deps.memR.findByIDFunc = func(_ context.Context, id shared.RecordID) (*memory.MemoryRecord, error) {
+	deps.memR.findByIDFunc = func(_ context.Context, _ shared.Scope, id shared.RecordID) (*memory.MemoryRecord, error) {
 		if id.Equal(mem.ID) {
 			return mem, nil
 		}
@@ -273,7 +273,7 @@ func TestPurgeService_Execute_Success(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	deps.purgeR.findByIDFunc = func(_ context.Context, id shared.RecordID) (*purge.PurgeRecord, error) {
+	deps.purgeR.findByIDFunc = func(_ context.Context, _ shared.Scope, id shared.RecordID) (*purge.PurgeRecord, error) {
 		if id.Equal(record.ID) {
 			return record, nil
 		}
@@ -281,7 +281,7 @@ func TestPurgeService_Execute_Success(t *testing.T) {
 	}
 
 	var wipeCalled bool
-	deps.memR.wipeFunc = func(_ context.Context, _ shared.RecordID) error {
+	deps.memR.wipeFunc = func(_ context.Context, _ shared.Scope, _ shared.RecordID) error {
 		wipeCalled = true
 		return nil
 	}
@@ -292,13 +292,13 @@ func TestPurgeService_Execute_Success(t *testing.T) {
 		return nil
 	}
 
-	deps.relR.deleteByTargetFunc = func(_ context.Context, _ shared.RecordID) (int, error) {
+	deps.relR.deleteByTargetFunc = func(_ context.Context, _ shared.Scope, _ shared.RecordID) (int, error) {
 		return 3, nil
 	}
 
 	var updatedStatus shared.PurgeStatus
 	var updatedArtifacts *purge.PurgedArtifacts
-	deps.purgeR.updateStatusFunc = func(_ context.Context, _ shared.RecordID, status shared.PurgeStatus, artifacts *purge.PurgedArtifacts) error {
+	deps.purgeR.updateStatusFunc = func(_ context.Context, _ shared.Scope, _ shared.RecordID, status shared.PurgeStatus, artifacts *purge.PurgedArtifacts) error {
 		updatedStatus = status
 		updatedArtifacts = artifacts
 		return nil
@@ -332,7 +332,7 @@ func TestPurgeService_Execute_NotPending(t *testing.T) {
 	// Transition to failed so it's no longer pending.
 	record.MarkFailed("previous failure")
 
-	deps.purgeR.findByIDFunc = func(_ context.Context, id shared.RecordID) (*purge.PurgeRecord, error) {
+	deps.purgeR.findByIDFunc = func(_ context.Context, _ shared.Scope, id shared.RecordID) (*purge.PurgeRecord, error) {
 		if id.Equal(record.ID) {
 			return record, nil
 		}
@@ -361,7 +361,7 @@ func TestPurgeService_Execute_AlreadyExecuted(t *testing.T) {
 	require.NoError(t, record.MarkExecuting())
 	require.NoError(t, record.MarkExecuted(purge.PurgedArtifacts{}, deps.clock))
 
-	deps.purgeR.findByIDFunc = func(_ context.Context, id shared.RecordID) (*purge.PurgeRecord, error) {
+	deps.purgeR.findByIDFunc = func(_ context.Context, _ shared.Scope, id shared.RecordID) (*purge.PurgeRecord, error) {
 		if id.Equal(record.ID) {
 			return record, nil
 		}
@@ -386,7 +386,7 @@ func TestPurgeService_Execute_TxFailure_MarksFailed(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	deps.purgeR.findByIDFunc = func(_ context.Context, id shared.RecordID) (*purge.PurgeRecord, error) {
+	deps.purgeR.findByIDFunc = func(_ context.Context, _ shared.Scope, id shared.RecordID) (*purge.PurgeRecord, error) {
 		if id.Equal(record.ID) {
 			return record, nil
 		}
@@ -399,7 +399,7 @@ func TestPurgeService_Execute_TxFailure_MarksFailed(t *testing.T) {
 	}
 
 	var failedStatus shared.PurgeStatus
-	deps.purgeR.updateStatusFunc = func(_ context.Context, _ shared.RecordID, status shared.PurgeStatus, _ *purge.PurgedArtifacts) error {
+	deps.purgeR.updateStatusFunc = func(_ context.Context, _ shared.Scope, _ shared.RecordID, status shared.PurgeStatus, _ *purge.PurgedArtifacts) error {
 		failedStatus = status
 		return nil
 	}

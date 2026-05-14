@@ -44,7 +44,7 @@ func (m *mockDecisionRepo) Save(_ context.Context, d *decision.Decision) error {
 	return nil
 }
 
-func (m *mockDecisionRepo) FindByID(_ context.Context, _ shared.RecordID) (*decision.Decision, error) {
+func (m *mockDecisionRepo) FindByID(_ context.Context, _ shared.Scope, _ shared.RecordID) (*decision.Decision, error) {
 	return m.findByIDResult, m.findByIDErr
 }
 
@@ -60,7 +60,7 @@ func (m *mockDecisionRepo) FindActiveByScope(_ context.Context, _ shared.Scope) 
 	return m.activeByScopeResult, m.activeByScopeErr
 }
 
-func (m *mockDecisionRepo) UpdateStatus(_ context.Context, id shared.RecordID, status shared.DecisionStatus, supersededBy *shared.RecordID) error {
+func (m *mockDecisionRepo) UpdateStatus(_ context.Context, _ shared.Scope, id shared.RecordID, status shared.DecisionStatus, supersededBy *shared.RecordID) error {
 	if m.updateStatusErr != nil {
 		return m.updateStatusErr
 	}
@@ -81,11 +81,11 @@ func (m *mockRelationRepo) Save(_ context.Context, rel *relation.Relation) error
 	return nil
 }
 
-func (m *mockRelationRepo) FindFromSource(_ context.Context, _ shared.RecordID, _ *shared.RelationType) ([]relation.Relation, error) {
+func (m *mockRelationRepo) FindFromSource(_ context.Context, _ shared.Scope, _ shared.RecordID, _ *shared.RelationType) ([]relation.Relation, error) {
 	return nil, nil
 }
 
-func (m *mockRelationRepo) FindToTarget(_ context.Context, _ shared.RecordID, _ *shared.RelationType) ([]relation.Relation, error) {
+func (m *mockRelationRepo) FindToTarget(_ context.Context, _ shared.Scope, _ shared.RecordID, _ *shared.RelationType) ([]relation.Relation, error) {
 	return nil, nil
 }
 
@@ -93,7 +93,7 @@ func (m *mockRelationRepo) Traverse(_ context.Context, _ outbound.TraverseQuery)
 	return nil, nil
 }
 
-func (m *mockRelationRepo) DeleteByTarget(_ context.Context, _ shared.RecordID) (int, error) {
+func (m *mockRelationRepo) DeleteByTarget(_ context.Context, _ shared.Scope, _ shared.RecordID) (int, error) {
 	return 0, nil
 }
 

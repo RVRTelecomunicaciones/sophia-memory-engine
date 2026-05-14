@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/sophia-engine/memory-engine/internal/domain/auth"
 	"github.com/sophia-engine/memory-engine/internal/domain/decision"
 	"github.com/sophia-engine/memory-engine/internal/domain/relation"
 	"github.com/sophia-engine/memory-engine/internal/domain/shared"
@@ -39,8 +40,50 @@ func NewService(
 	}
 }
 
+// scopeFromCtx derives the auth-derived scope from the request context.
+// When no auth context is present (e.g., internal workers without middleware),
+// an empty Scope is returned — which causes the repo WHERE clause to match
+// nothing, acting as a safe fail-closed default.
+func scopeFromCtx(ctx context.Context) shared.Scope {
+	ac, ok := auth.FromContext(ctx)
+	if !ok {
+		return shared.Scope{}
+	}
+	s := shared.Scope{ProjectID: ac.ProjectID}
+	if ac.TenantID != "" {
+		s.TenantID = &ac.TenantID
+	}
+	return s
+}
+
+// assertScopeMatch returns ErrScopeForbidden when the request scope does not
+// match the authenticated scope. The response body must never echo which field
+// mismatched to prevent information leakage.
+func assertScopeMatch(authS shared.Scope, requestS shared.Scope) error {
+	if authS.ProjectID != requestS.ProjectID {
+		return shared.ErrScopeForbidden
+	}
+	if authS.TenantID != nil {
+		if requestS.TenantID == nil || *authS.TenantID != *requestS.TenantID {
+			return shared.ErrScopeForbidden
+		}
+	}
+	return nil
+}
+
 // Record creates a new decision, optionally superseding an existing active one.
+//
+// Scope assertion: when an auth context is present, the request's scope MUST
+// match the authenticated (project_id, tenant_id). A mismatch returns
+// ErrScopeForbidden (HTTP 403).
 func (s *Service) Record(ctx context.Context, cmd inbound.RecordDecisionCmd) (*inbound.RecordDecisionResult, error) {
+	authS := scopeFromCtx(ctx)
+	if authS.ProjectID != "" {
+		if err := assertScopeMatch(authS, cmd.Scope); err != nil {
+			return nil, err
+		}
+	}
+
 	// Look for existing active decision with same key+scope.
 	existing, err := s.decRepo.FindActiveByKey(ctx, cmd.DecisionKey, cmd.Scope)
 	if err != nil && !errors.Is(err, shared.ErrNotFound) {
@@ -76,7 +119,7 @@ func (s *Service) Record(ctx context.Context, cmd inbound.RecordDecisionCmd) (*i
 			if err := existing.Supersede(newDec.ID); err != nil {
 				return err
 			}
-			if err := s.decRepo.UpdateStatus(txCtx, existing.ID, existing.Status, existing.SupersededBy); err != nil {
+			if err := s.decRepo.UpdateStatus(txCtx, authS, existing.ID, existing.Status, existing.SupersededBy); err != nil {
 				return err
 			}
 			if err := s.decRepo.Save(txCtx, newDec); err != nil {
@@ -123,9 +166,10 @@ func (s *Service) Record(ctx context.Context, cmd inbound.RecordDecisionCmd) (*i
 	}, nil
 }
 
-// Get retrieves a decision by ID.
+// Get retrieves a decision by ID within the auth scope.
+// Cross-project reads return ErrNotFound (not ErrScopeForbidden).
 func (s *Service) Get(ctx context.Context, id shared.RecordID) (*decision.Decision, error) {
-	return s.decRepo.FindByID(ctx, id)
+	return s.decRepo.FindByID(ctx, scopeFromCtx(ctx), id)
 }
 
 // GetHistory retrieves all versions of a decision by key and scope.
@@ -135,7 +179,9 @@ func (s *Service) GetHistory(ctx context.Context, query inbound.DecisionHistoryQ
 
 // Contradict marks a decision as contradicted and creates a contradicts relation.
 func (s *Service) Contradict(ctx context.Context, cmd inbound.ContradictDecisionCmd) error {
-	target, err := s.decRepo.FindByID(ctx, cmd.TargetID)
+	authS := scopeFromCtx(ctx)
+
+	target, err := s.decRepo.FindByID(ctx, authS, cmd.TargetID)
 	if err != nil {
 		return err
 	}
@@ -144,7 +190,7 @@ func (s *Service) Contradict(ctx context.Context, cmd inbound.ContradictDecision
 		return err
 	}
 
-	if err := s.decRepo.UpdateStatus(ctx, cmd.TargetID, shared.DecisionStatusContradicted, nil); err != nil {
+	if err := s.decRepo.UpdateStatus(ctx, authS, cmd.TargetID, shared.DecisionStatusContradicted, nil); err != nil {
 		return err
 	}
 

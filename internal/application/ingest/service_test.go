@@ -22,9 +22,9 @@ import (
 
 type mockMemoryRepo struct {
 	saveFunc         func(ctx context.Context, record *memory.MemoryRecord) error
-	findByIDFunc     func(ctx context.Context, id shared.RecordID) (*memory.MemoryRecord, error)
+	findByIDFunc     func(ctx context.Context, scope shared.Scope, id shared.RecordID) (*memory.MemoryRecord, error)
 	findByTopicFunc  func(ctx context.Context, scope shared.Scope, topicKey string) (*memory.MemoryRecord, error)
-	updateStatusFunc func(ctx context.Context, id shared.RecordID, status shared.MemoryStatus) error
+	updateStatusFunc func(ctx context.Context, scope shared.Scope, id shared.RecordID, status shared.MemoryStatus) error
 	saved            []*memory.MemoryRecord
 	lastTopicKey     string
 	lastScope        shared.Scope
@@ -38,9 +38,9 @@ func (m *mockMemoryRepo) Save(ctx context.Context, record *memory.MemoryRecord) 
 	return nil
 }
 
-func (m *mockMemoryRepo) FindByID(ctx context.Context, id shared.RecordID) (*memory.MemoryRecord, error) {
+func (m *mockMemoryRepo) FindByID(ctx context.Context, scope shared.Scope, id shared.RecordID) (*memory.MemoryRecord, error) {
 	if m.findByIDFunc != nil {
-		return m.findByIDFunc(ctx, id)
+		return m.findByIDFunc(ctx, scope, id)
 	}
 	return nil, shared.ErrNotFound
 }
@@ -54,14 +54,14 @@ func (m *mockMemoryRepo) FindLatestActiveByTopicKey(ctx context.Context, scope s
 	return nil, shared.ErrNotFound
 }
 
-func (m *mockMemoryRepo) UpdateStatus(ctx context.Context, id shared.RecordID, status shared.MemoryStatus) error {
+func (m *mockMemoryRepo) UpdateStatus(ctx context.Context, scope shared.Scope, id shared.RecordID, status shared.MemoryStatus) error {
 	if m.updateStatusFunc != nil {
-		return m.updateStatusFunc(ctx, id, status)
+		return m.updateStatusFunc(ctx, scope, id, status)
 	}
 	return nil
 }
 
-func (m *mockMemoryRepo) WipeContent(ctx context.Context, id shared.RecordID) error {
+func (m *mockMemoryRepo) WipeContent(ctx context.Context, scope shared.Scope, id shared.RecordID) error {
 	return nil
 }
 
@@ -255,7 +255,7 @@ func TestIngestService_Get_Success(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	repo.findByIDFunc = func(_ context.Context, id shared.RecordID) (*memory.MemoryRecord, error) {
+	repo.findByIDFunc = func(_ context.Context, _ shared.Scope, id shared.RecordID) (*memory.MemoryRecord, error) {
 		if id.Equal(record.ID) {
 			return record, nil
 		}
@@ -282,7 +282,7 @@ func TestIngestService_Get_NotFound(t *testing.T) {
 func TestIngestService_Get_Purged(t *testing.T) {
 	svc, repo, _ := newTestService()
 
-	repo.findByIDFunc = func(_ context.Context, _ shared.RecordID) (*memory.MemoryRecord, error) {
+	repo.findByIDFunc = func(_ context.Context, _ shared.Scope, _ shared.RecordID) (*memory.MemoryRecord, error) {
 		return nil, shared.ErrPurged
 	}
 
@@ -310,7 +310,7 @@ func TestIngestService_Archive_Success(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	repo.findByIDFunc = func(_ context.Context, id shared.RecordID) (*memory.MemoryRecord, error) {
+	repo.findByIDFunc = func(_ context.Context, _ shared.Scope, id shared.RecordID) (*memory.MemoryRecord, error) {
 		if id.Equal(record.ID) {
 			return record, nil
 		}
@@ -318,7 +318,7 @@ func TestIngestService_Archive_Success(t *testing.T) {
 	}
 
 	var updatedStatus shared.MemoryStatus
-	repo.updateStatusFunc = func(_ context.Context, _ shared.RecordID, status shared.MemoryStatus) error {
+	repo.updateStatusFunc = func(_ context.Context, _ shared.Scope, _ shared.RecordID, status shared.MemoryStatus) error {
 		updatedStatus = status
 		return nil
 	}

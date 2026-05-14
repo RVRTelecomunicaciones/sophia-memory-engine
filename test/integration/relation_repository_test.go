@@ -41,14 +41,16 @@ func TestRelationRepository_SaveAndFindFromSource(t *testing.T) {
 	require.NoError(t, repo.Save(ctx, rel1))
 	require.NoError(t, repo.Save(ctx, rel2))
 
-	// Find all from source
-	results, err := repo.FindFromSource(ctx, src, nil)
+	scope, _ := shared.NewScope("proj-1")
+
+	// Find all from source (scoped to proj-1)
+	results, err := repo.FindFromSource(ctx, scope, src, nil)
 	require.NoError(t, err)
 	assert.Len(t, results, 2)
 
 	// Find with type filter
 	relType := shared.RelationTypeRelatesTo
-	results, err = repo.FindFromSource(ctx, src, &relType)
+	results, err = repo.FindFromSource(ctx, scope, src, &relType)
 	require.NoError(t, err)
 	assert.Len(t, results, 1)
 	assert.Equal(t, shared.RelationTypeRelatesTo, results[0].Type)
@@ -66,7 +68,8 @@ func TestRelationRepository_FindToTarget(t *testing.T) {
 	require.NoError(t, repo.Save(ctx, makeRelation(t, src1, tgt, shared.RelationTypeReferences, "proj-1")))
 	require.NoError(t, repo.Save(ctx, makeRelation(t, src2, tgt, shared.RelationTypeReferences, "proj-1")))
 
-	results, err := repo.FindToTarget(ctx, tgt, nil)
+	scope, _ := shared.NewScope("proj-1")
+	results, err := repo.FindToTarget(ctx, scope, tgt, nil)
 	require.NoError(t, err)
 	assert.Len(t, results, 2)
 }
@@ -318,12 +321,13 @@ func TestRelationRepository_DeleteByTarget(t *testing.T) {
 	// Unrelated relation
 	require.NoError(t, repo.Save(ctx, makeRelation(t, src1, other, shared.RelationTypeRelatesTo, "proj-1")))
 
-	deleted, err := repo.DeleteByTarget(ctx, target)
+	scope, _ := shared.NewScope("proj-1")
+	deleted, err := repo.DeleteByTarget(ctx, scope, target)
 	require.NoError(t, err)
 	assert.Equal(t, 2, deleted, "should delete 2 relations involving target")
 
 	// Verify unrelated relation still exists
-	remaining, err := repo.FindFromSource(ctx, src1, nil)
+	remaining, err := repo.FindFromSource(ctx, scope, src1, nil)
 	require.NoError(t, err)
 	assert.Len(t, remaining, 1, "unrelated relation should survive")
 }
@@ -333,7 +337,8 @@ func TestRelationRepository_DeleteByTarget_NoRelations(t *testing.T) {
 	repo := persistence.NewRelationPgRepository(pool)
 	ctx := context.Background()
 
-	deleted, err := repo.DeleteByTarget(ctx, shared.NewRecordID())
+	scope, _ := shared.NewScope("proj-1")
+	deleted, err := repo.DeleteByTarget(ctx, scope, shared.NewRecordID())
 	require.NoError(t, err)
 	assert.Equal(t, 0, deleted, "no relations to delete is not an error")
 }
