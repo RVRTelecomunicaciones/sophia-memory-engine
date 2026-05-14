@@ -22,6 +22,18 @@ type MemoryRepository interface {
 	// Save persists a new memory record. Scope is embedded in record.Scope.
 	Save(ctx context.Context, record *memory.MemoryRecord) error
 
+	// UpsertByTopicKey inserts the record, or — when an active row already
+	// exists in the same scope (project_id + tenant_id) with the same
+	// topic_key — updates that row's content + provenance + temporal fields
+	// in place. The returned id is the existing row's id on an update;
+	// `inserted` is true iff a new row was created. Implementations MUST rely
+	// on the partial unique index introduced in migration 004 (ADR-0005 P1.3)
+	// so that concurrent calls converge to exactly one active row.
+	//
+	// Scope assertion (P1.5) MUST be performed by the application layer
+	// BEFORE this method is called.
+	UpsertByTopicKey(ctx context.Context, record *memory.MemoryRecord) (id shared.RecordID, inserted bool, err error)
+
 	// FindByID retrieves a memory record scoped to authScope.
 	// Returns shared.ErrNotFound if the record does not exist or belongs to a
 	// different project (cross-project reads look identical to missing rows).
@@ -32,6 +44,12 @@ type MemoryRepository interface {
 	// required; any optional scope fields (TenantID, RepoID, AgentID,
 	// SessionID, Environment) further narrow the match. Returns
 	// shared.ErrNotFound when no active record matches.
+	//
+	// Post-migration-004, the (project_id, tenant_id, topic_key) tuple is
+	// unique among active rows, so this returns at most one row when the
+	// optional scope fields are NOT set. Optional fields still further filter
+	// (e.g., repo_id) — callers who over-specify may get ErrNotFound even when
+	// a canonical row exists.
 	FindLatestActiveByTopicKey(ctx context.Context, scope shared.Scope, topicKey string) (*memory.MemoryRecord, error)
 
 	// UpdateStatus transitions the status of a scoped memory record.

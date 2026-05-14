@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/sophia-engine/memory-engine/internal/application/ingest"
+	"github.com/sophia-engine/memory-engine/internal/domain/auth"
 	"github.com/sophia-engine/memory-engine/internal/domain/memory"
 	"github.com/sophia-engine/memory-engine/internal/domain/shared"
 	"github.com/sophia-engine/memory-engine/internal/ports/inbound"
@@ -22,10 +23,12 @@ import (
 
 type mockMemoryRepo struct {
 	saveFunc         func(ctx context.Context, record *memory.MemoryRecord) error
+	upsertFunc       func(ctx context.Context, record *memory.MemoryRecord) (shared.RecordID, bool, error)
 	findByIDFunc     func(ctx context.Context, scope shared.Scope, id shared.RecordID) (*memory.MemoryRecord, error)
 	findByTopicFunc  func(ctx context.Context, scope shared.Scope, topicKey string) (*memory.MemoryRecord, error)
 	updateStatusFunc func(ctx context.Context, scope shared.Scope, id shared.RecordID, status shared.MemoryStatus) error
 	saved            []*memory.MemoryRecord
+	upserted         []*memory.MemoryRecord
 	lastTopicKey     string
 	lastScope        shared.Scope
 }
@@ -36,6 +39,14 @@ func (m *mockMemoryRepo) Save(ctx context.Context, record *memory.MemoryRecord) 
 		return m.saveFunc(ctx, record)
 	}
 	return nil
+}
+
+func (m *mockMemoryRepo) UpsertByTopicKey(ctx context.Context, record *memory.MemoryRecord) (shared.RecordID, bool, error) {
+	m.upserted = append(m.upserted, record)
+	if m.upsertFunc != nil {
+		return m.upsertFunc(ctx, record)
+	}
+	return record.ID, true, nil
 }
 
 func (m *mockMemoryRepo) FindByID(ctx context.Context, scope shared.Scope, id shared.RecordID) (*memory.MemoryRecord, error) {
@@ -231,11 +242,93 @@ func TestIngestService_Ingest_WithAllOptions(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
-	saved := repo.saved[0]
-	assert.Equal(t, &summary, saved.Summary)
-	assert.Equal(t, []string{"architecture", "testing"}, saved.Tags)
-	assert.Equal(t, &topicKey, saved.TopicKey)
-	assert.Equal(t, "english", saved.FTSLanguage)
+	// With topic_key set the service MUST route through UpsertByTopicKey,
+	// not Save (ADR-0005 P1.3).
+	assert.Empty(t, repo.saved, "save must NOT be called when topic_key is set")
+	require.Len(t, repo.upserted, 1)
+	upserted := repo.upserted[0]
+	assert.Equal(t, &summary, upserted.Summary)
+	assert.Equal(t, []string{"architecture", "testing"}, upserted.Tags)
+	assert.Equal(t, &topicKey, upserted.TopicKey)
+	assert.Equal(t, "english", upserted.FTSLanguage)
+}
+
+// TestIngestService_Ingest_NoTopicKey_UsesSave verifies that when topic_key
+// is absent the service uses the legacy Save path (no upsert).
+func TestIngestService_Ingest_NoTopicKey_UsesSave(t *testing.T) {
+	svc, repo, _ := newTestService()
+
+	cmd := inbound.IngestMemoryCmd{
+		Type:       shared.MemoryTypeSemantic,
+		Content:    "no topic key here",
+		Scope:      validScope(t),
+		Provenance: validProvenance(t),
+	}
+
+	_, err := svc.Ingest(context.Background(), cmd)
+	require.NoError(t, err)
+
+	assert.Len(t, repo.saved, 1, "Save must be called for no-topic-key ingests")
+	assert.Empty(t, repo.upserted, "UpsertByTopicKey must NOT fire when topic_key is absent")
+}
+
+// TestIngestService_Ingest_WithTopicKey_ScopeForbidden verifies the P1.5
+// scope assertion fires BEFORE the upsert path. A request scope that does
+// not match the authenticated scope MUST return ErrScopeForbidden and the
+// repo MUST NOT be touched.
+func TestIngestService_Ingest_WithTopicKey_ScopeForbidden(t *testing.T) {
+	svc, repo, _ := newTestService()
+
+	ctx := auth.NewContext(context.Background(), auth.AuthContext{
+		TenantID:  "",
+		ProjectID: "project-auth",
+		KeyID:     "01JTEST00000000000000000AA",
+	})
+
+	topicKey := "sdd/test/tasks"
+	cmd := inbound.IngestMemoryCmd{
+		Type:       shared.MemoryTypeSemantic,
+		Content:    "evil cross-project",
+		TopicKey:   &topicKey,
+		Scope:      validScope(t), // project-id = "test-project" — DIFFERENT from auth
+		Provenance: validProvenance(t),
+	}
+
+	_, err := svc.Ingest(ctx, cmd)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, shared.ErrScopeForbidden),
+		"upsert path MUST honor the P1.5 scope assertion before touching the repo")
+	assert.Empty(t, repo.saved)
+	assert.Empty(t, repo.upserted, "scope-forbidden upsert MUST NOT call the repo")
+}
+
+// TestIngestService_Ingest_WithTopicKey_UsesUpsert verifies routing to upsert
+// and that the returned id reflects the repo's verdict (existing-row id on
+// conflict).
+func TestIngestService_Ingest_WithTopicKey_UsesUpsert(t *testing.T) {
+	svc, repo, _ := newTestService()
+
+	existingID := shared.NewRecordID()
+	repo.upsertFunc = func(_ context.Context, _ *memory.MemoryRecord) (shared.RecordID, bool, error) {
+		return existingID, false, nil // simulate UPDATE branch
+	}
+
+	topicKey := "sdd/test/tasks"
+	cmd := inbound.IngestMemoryCmd{
+		Type:       shared.MemoryTypeSemantic,
+		Content:    "v2 content",
+		TopicKey:   &topicKey,
+		Scope:      validScope(t),
+		Provenance: validProvenance(t),
+	}
+
+	res, err := svc.Ingest(context.Background(), cmd)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+
+	assert.Empty(t, repo.saved)
+	require.Len(t, repo.upserted, 1)
+	assert.Equal(t, existingID, res.ID, "result id must be the repo-returned id (existing row on UPDATE)")
 }
 
 // ---------------------------------------------------------------------------

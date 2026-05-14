@@ -230,8 +230,10 @@ func (h *MemoryHandler) Get(w http.ResponseWriter, r *http.Request) {
 // Required query params: project_id, topic_key.
 // Optional scope refinements: tenant_id, repo_id, agent_id, session_id, environment.
 //
-// Returns the latest active memory record matching the criteria, or 404 when
-// no active record matches.
+// Returns the active memory record matching the criteria, or 404 when no
+// active record matches. Cross-project requests masquerade as 404 (ADR-0005
+// §P1.5 existence leak prevention). Post-migration-004 the
+// (project_id, tenant_id, topic_key) tuple is unique among active rows.
 func (h *MemoryHandler) GetByTopicKey(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 
