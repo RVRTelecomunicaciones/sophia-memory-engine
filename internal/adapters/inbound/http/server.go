@@ -1,6 +1,8 @@
 package http
 
 import (
+	"crypto/rand"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -29,6 +31,12 @@ func NewRouter(
 	db DBPinger,
 ) chi.Router {
 	r := chi.NewRouter()
+	// TraceW3C MUST run FIRST (before APIKey and any other middleware) so:
+	//   - 401 responses from APIKey also carry trace_id for cross-service debug
+	//   - /health and /ready (which sit outside /api/v1) are also enriched
+	//   - every subsequent middleware can read trace.FromContext(ctx)
+	// See ADR-0005 P2.2c.
+	r.Use(middleware.TraceW3C(rand.Reader, slog.Default()))
 	r.Use(chiMiddleware.RequestID)
 	r.Use(chiMiddleware.RealIP)
 	r.Use(chiMiddleware.Recoverer)

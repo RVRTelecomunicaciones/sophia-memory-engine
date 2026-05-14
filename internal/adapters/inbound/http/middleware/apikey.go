@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"github.com/sophia-engine/memory-engine/internal/domain/auth"
@@ -23,6 +24,9 @@ func APIKey(svc inbound.AuthService) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			key := r.Header.Get("X-API-Key")
 			if key == "" {
+				slog.WarnContext(r.Context(), "apikey: missing X-API-Key header",
+					slog.String("path", r.URL.Path),
+				)
 				writeUnauthorized(w, "missing X-API-Key header")
 				return
 			}
@@ -30,6 +34,12 @@ func APIKey(svc inbound.AuthService) func(http.Handler) http.Handler {
 			ac, err := svc.Authenticate(r.Context(), key)
 			if err != nil {
 				// Do NOT echo the specific error reason — same 401 for all failure modes.
+				// The log line carries trace_id (via P2.2c slog handler) so operators
+				// can still distinguish failure modes server-side.
+				slog.WarnContext(r.Context(), "apikey: authentication failed",
+					slog.String("path", r.URL.Path),
+					slog.String("error", err.Error()),
+				)
 				writeUnauthorized(w, "unauthorized")
 				return
 			}
