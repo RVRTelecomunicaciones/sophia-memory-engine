@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -45,9 +46,17 @@ func (h *ReadyHandler) Ready(w http.ResponseWriter, r *http.Request) {
 		checks["db"] = err.Error()
 		status = http.StatusServiceUnavailable
 		overall = "degraded"
+		// Log with InfoContext so the trace_id from P2.2c reaches the log.
+		slog.WarnContext(r.Context(), "ready: db ping failed",
+			slog.String("error", err.Error()),
+		)
 	} else {
 		checks["db"] = "ok"
 	}
+
+	slog.InfoContext(r.Context(), "ready: probe complete",
+		slog.String("status", overall),
+	)
 
 	writeJSON(w, status, map[string]any{
 		"status": overall,

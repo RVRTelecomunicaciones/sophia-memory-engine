@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -197,10 +198,17 @@ func (h *MemoryHandler) Ingest(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.svc.Ingest(r.Context(), cmd)
 	if err != nil {
+		slog.WarnContext(r.Context(), "memory: ingest failed",
+			slog.String("error", err.Error()),
+		)
 		writeError(w, err)
 		return
 	}
 
+	slog.InfoContext(r.Context(), "memory: ingested",
+		slog.String("id", result.ID.String()),
+		slog.String("type", string(cmd.Type)),
+	)
 	writeJSON(w, http.StatusCreated, ingestResponse{
 		ID:        result.ID.String(),
 		CreatedAt: result.CreatedAt,
