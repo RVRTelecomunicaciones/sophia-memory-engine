@@ -13,11 +13,49 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-// SetupTestDB starts a PostgreSQL container, runs migrations, and returns a connection pool.
-// The container and pool are automatically cleaned up when the test finishes.
+// envExternalDSN, when set, tells SetupTestDB to connect to an externally
+// managed PostgreSQL (already migrated by `cmd/migrate`) instead of starting
+// a testcontainers instance and applying migrations inside the test process.
+//
+// This is the path the CI migrations gate uses: a Postgres service container
+// is provisioned and migrated by `cmd/migrate up` before integration tests
+// run, proving that `001_*.up.sql` + `002_*.up.sql` alone produce the schema
+// every adapter requires (no in-test schema creation).
+const envExternalDSN = "MEMORY_ENGINE_TEST_DSN"
+
+// SetupTestDB returns a connection pool for integration tests.
+//
+//   - If MEMORY_ENGINE_TEST_DSN is set, it connects to that DSN and assumes
+//     the schema has already been migrated externally (CI gate path).
+//   - Otherwise, it starts a fresh Postgres 16 container via testcontainers
+//     and applies the SQL migrations directly (developer laptop path).
+//
+// The pool is closed automatically when the test finishes.
 func SetupTestDB(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	ctx := context.Background()
+
+	if dsn := os.Getenv(envExternalDSN); dsn != "" {
+		pool, err := pgxpool.New(ctx, dsn)
+		if err != nil {
+			t.Fatalf("connect to external test DB at %s: %v", envExternalDSN, err)
+		}
+		t.Cleanup(func() { pool.Close() })
+		// Sanity check the schema is in place. If the migration gate failed
+		// to run before the tests, surface a clear error here.
+		var n int
+		if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM information_schema.tables
+			WHERE table_schema = 'public'
+			  AND table_name IN ('memories','decisions','heuristics','relations',
+				'purge_records','project_profiles','domain_events','retrieval_feedback')`).Scan(&n); err != nil {
+			t.Fatalf("schema check on external DB: %v", err)
+		}
+		if n < 8 {
+			t.Fatalf("external DB schema incomplete: only %d/8 expected tables present "+
+				"(did `cmd/migrate up` run before the tests?)", n)
+		}
+		return pool
+	}
 
 	container, err := postgres.Run(ctx,
 		"postgres:16-alpine",

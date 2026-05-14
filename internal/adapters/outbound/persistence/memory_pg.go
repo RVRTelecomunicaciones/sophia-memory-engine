@@ -3,8 +3,10 @@ package persistence
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/sophia-engine/memory-engine/internal/domain/memory"
 	"github.com/sophia-engine/memory-engine/internal/domain/shared"
@@ -92,36 +94,27 @@ func (r *MemoryPgRepository) Save(ctx context.Context, record *memory.MemoryReco
 	return err
 }
 
-// FindByID retrieves a MemoryRecord by its ID within the given scope.
-// Returns shared.ErrNotFound if the record does not exist OR belongs to a
-// different project — the two cases are intentionally indistinguishable to
-// prevent existence leaks across project boundaries (see ADR-0005 §P1.5).
-// Returns shared.ErrPurged if the record has been purged.
-//
-// Scope: scope is provided by the application layer from the auth context.
-// The record's scope is NOT used here; only the project_id and tenant_id from
-// the auth context are used as row filters.
-func (r *MemoryPgRepository) FindByID(ctx context.Context, scope shared.Scope, id shared.RecordID) (*memory.MemoryRecord, error) {
-	conn := getConn(ctx, r.pool)
+// memoryColumns is the canonical projection used by every memory SELECT in
+// this adapter. Keep it in sync with scanMemoryRow's argument order.
+const memoryColumns = `
+	id, type, content, summary, tags, topic_key, fts_language,
+	tenant_id, project_id, repo_id, agent_id, session_id, environment,
+	source, source_uri, ingest_method, parent_id,
+	valid_from, valid_until, last_accessed, freshness,
+	importance_score, importance_computed_at, importance_factors,
+	status, archived_by, archive_reason,
+	created_at, updated_at`
 
-	// Tenant predicate: NULL tenant on the row is visible to any key in the project
-	// (legacy / cross-tenant rows). A non-NULL tenant must match exactly.
-	const query = `
-		SELECT
-			id, type, content, summary, tags, topic_key, fts_language,
-			tenant_id, project_id, repo_id, agent_id, session_id, environment,
-			source, source_uri, ingest_method, parent_id,
-			valid_from, valid_until, last_accessed, freshness,
-			importance_score, importance_computed_at, importance_factors,
-			status, archived_by, archive_reason,
-			created_at, updated_at
-		FROM memories
-		WHERE id = $1
-		  AND project_id = $2
-		  AND (tenant_id IS NULL OR tenant_id = $3)`
+// memoryRowScanner is implemented by both pgx.Row and pgx.Rows.
+type memoryRowScanner interface {
+	Scan(dest ...any) error
+}
 
-	row := conn.QueryRow(ctx, query, id.String(), scope.ProjectID, scope.TenantID)
-
+// scanMemoryRow scans a row matching memoryColumns into a domain MemoryRecord.
+// Returns shared.ErrPurged for purged records. Caller is responsible for
+// translating "no rows" into shared.ErrNotFound (semantics differ between
+// QueryRow and Query).
+func scanMemoryRow(scanner memoryRowScanner) (*memory.MemoryRecord, error) {
 	var (
 		idStr        string
 		memType      string
@@ -154,7 +147,7 @@ func (r *MemoryPgRepository) FindByID(ctx context.Context, scope shared.Scope, i
 		updatedAt    time.Time
 	)
 
-	err := row.Scan(
+	if err := scanner.Scan(
 		&idStr, &memType, &content, &summary, &tags, &topicKey, &ftsLanguage,
 		&tenantID, &projectID, &repoID, &agentID, &sessionID, &environment,
 		&source, &sourceURI, &ingestMethod, &parentIDStr,
@@ -162,11 +155,7 @@ func (r *MemoryPgRepository) FindByID(ctx context.Context, scope shared.Scope, i
 		&impScore, &impComputed, &impFactors,
 		&status, &archivedBy, &archiveRsn,
 		&createdAt, &updatedAt,
-	)
-	if err != nil {
-		if err.Error() == "no rows in result set" {
-			return nil, shared.ErrNotFound
-		}
+	); err != nil {
 		return nil, err
 	}
 
@@ -195,7 +184,7 @@ func (r *MemoryPgRepository) FindByID(ctx context.Context, scope shared.Scope, i
 		}
 	}
 
-	rec := &memory.MemoryRecord{
+	return &memory.MemoryRecord{
 		ID:      recordID,
 		Type:    shared.MemoryType(memType),
 		Content: content,
@@ -233,6 +222,80 @@ func (r *MemoryPgRepository) FindByID(ctx context.Context, scope shared.Scope, i
 		FTSLanguage:   ftsLanguage,
 		CreatedAt:     createdAt,
 		UpdatedAt:     updatedAt,
+	}, nil
+}
+
+// FindByID retrieves a MemoryRecord by its ID within the given scope.
+// Returns shared.ErrNotFound if the record does not exist OR belongs to a
+// different project — the two cases are intentionally indistinguishable to
+// prevent existence leaks across project boundaries (see ADR-0005 §P1.5).
+// Returns shared.ErrPurged if the record has been purged.
+//
+// Scope: scope is provided by the application layer from the auth context.
+// The record's scope is NOT used here; only the project_id and tenant_id from
+// the auth context are used as row filters.
+func (r *MemoryPgRepository) FindByID(ctx context.Context, scope shared.Scope, id shared.RecordID) (*memory.MemoryRecord, error) {
+	conn := getConn(ctx, r.pool)
+
+	// Tenant predicate: NULL tenant on the row is visible to any key in the project
+	// (legacy / cross-tenant rows). A non-NULL tenant must match exactly.
+	query := `SELECT ` + memoryColumns + ` FROM memories
+		WHERE id = $1
+		  AND project_id = $2
+		  AND (tenant_id IS NULL OR tenant_id = $3)`
+
+	row := conn.QueryRow(ctx, query, id.String(), scope.ProjectID, scope.TenantID)
+
+	rec, err := scanMemoryRow(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, shared.ErrNotFound
+		}
+		return nil, err
+	}
+
+	return rec, nil
+}
+
+// FindLatestActiveByTopicKey returns the newest active record for a given
+// topic_key within the supplied scope. Optional scope fields, when set,
+// further constrain the match. Returns shared.ErrNotFound when no active
+// record matches.
+func (r *MemoryPgRepository) FindLatestActiveByTopicKey(
+	ctx context.Context,
+	scope shared.Scope,
+	topicKey string,
+) (*memory.MemoryRecord, error) {
+	conn := getConn(ctx, r.pool)
+
+	query := `SELECT ` + memoryColumns + ` FROM memories
+		WHERE project_id = $1
+		  AND topic_key = $2
+		  AND status = 'active'
+		  AND ($3::text IS NULL OR tenant_id = $3)
+		  AND ($4::text IS NULL OR repo_id = $4)
+		  AND ($5::text IS NULL OR agent_id = $5)
+		  AND ($6::text IS NULL OR session_id = $6)
+		  AND ($7::text IS NULL OR environment = $7)
+		ORDER BY created_at DESC
+		LIMIT 1`
+
+	row := conn.QueryRow(ctx, query,
+		scope.ProjectID,
+		topicKey,
+		ptrStr(scope.TenantID),
+		ptrStr(scope.RepoID),
+		ptrStr(scope.AgentID),
+		ptrStr(scope.SessionID),
+		ptrStr(scope.Environment),
+	)
+
+	rec, err := scanMemoryRow(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, shared.ErrNotFound
+		}
+		return nil, err
 	}
 
 	return rec, nil

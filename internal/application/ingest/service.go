@@ -141,6 +141,47 @@ func (s *Service) Get(ctx context.Context, id shared.RecordID) (*memory.MemoryRe
 	return s.memRepo.FindByID(ctx, scope, id)
 }
 
+// GetByTopicKey retrieves the latest active memory record matching the given
+// topic key within the supplied scope. Validates that ProjectID and TopicKey
+// are non-empty, then delegates to the repository, which returns
+// shared.ErrNotFound when no active record matches.
+func (s *Service) GetByTopicKey(ctx context.Context, query inbound.GetByTopicKeyQuery) (*memory.MemoryRecord, error) {
+	var fields []shared.FieldError
+	if query.ProjectID == "" {
+		fields = append(fields, shared.FieldError{Field: "project_id", Message: "required"})
+	}
+	if query.TopicKey == "" {
+		fields = append(fields, shared.FieldError{Field: "topic_key", Message: "required"})
+	}
+	if len(fields) > 0 {
+		return nil, shared.NewValidationError(fields...)
+	}
+
+	var opts []shared.ScopeOption
+	if query.TenantID != nil {
+		opts = append(opts, shared.WithTenantID(*query.TenantID))
+	}
+	if query.RepoID != nil {
+		opts = append(opts, shared.WithRepoID(*query.RepoID))
+	}
+	if query.AgentID != nil {
+		opts = append(opts, shared.WithAgentID(*query.AgentID))
+	}
+	if query.SessionID != nil {
+		opts = append(opts, shared.WithSessionID(*query.SessionID))
+	}
+	if query.Environment != nil {
+		opts = append(opts, shared.WithEnvironment(*query.Environment))
+	}
+
+	scope, err := shared.NewScope(query.ProjectID, opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.memRepo.FindLatestActiveByTopicKey(ctx, scope, query.TopicKey)
+}
+
 // Archive transitions a memory record to archived status.
 // Both the fetch and the status update are scoped to the auth context, so a
 // cross-project archive attempt returns ErrNotFound at the fetch step.
