@@ -1158,8 +1158,17 @@ paths:
       operationId: getMemoryByTopicKey
       summary: Get active memory by topic key
       description: |
-        Returns the unique active memory for the (project_id, topic_key) pair.
-        Cross-project requests return 404 to prevent existence leaks (ADR-0005 section P1.5).
+        Returns the active memory record matching the supplied topic key
+        within the requested scope.
+
+        Post-migration-004 the (project_id, tenant_id, topic_key) tuple is
+        unique among active rows. The optional scope refinements (tenant_id,
+        repo_id, agent_id, session_id, environment) further narrow the match;
+        repo_id/agent_id/session_id/environment are not part of the uniqueness
+        key but act as additional filter predicates.
+
+        Cross-project requests return 404 to prevent existence leaks
+        (ADR-0005 section P1.5).
       tags: [Memories]
       parameters:
         - name: project_id
@@ -1174,6 +1183,31 @@ paths:
           schema:
             type: string
           example: architecture/db-driver
+        - name: tenant_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: repo_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: agent_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: session_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: environment
+          in: query
+          required: false
+          schema:
+            type: string
       responses:
         '200':
           description: Active memory found

@@ -27,13 +27,29 @@ func NewMemoryPgRepository(pool *pgxpool.Pool) *MemoryPgRepository {
 	return &MemoryPgRepository{pool: pool}
 }
 
+// memoryColumns is the canonical projection used by every memory SELECT in
+// this adapter. Keep it in sync with scanMemoryRow's argument order.
+const memoryColumns = `
+	id, type, content, summary, tags, topic_key, fts_language,
+	tenant_id, project_id, repo_id, agent_id, session_id, environment,
+	source, source_uri, ingest_method, parent_id,
+	valid_from, valid_until, last_accessed, freshness,
+	importance_score, importance_computed_at, importance_factors,
+	status, archived_by, archive_reason,
+	created_at, updated_at`
+
+// memoryRowScanner is implemented by both pgx.Row and pgx.Rows.
+type memoryRowScanner interface {
+	Scan(dest ...any) error
+}
+
 // Save inserts a MemoryRecord into the memories table.
 func (r *MemoryPgRepository) Save(ctx context.Context, record *memory.MemoryRecord) error {
 	conn := getConn(ctx, r.pool)
 
 	factorsJSON, err := json.Marshal(record.Importance.Factors)
 	if err != nil {
-		return err
+		return fmt.Errorf("memory_pg: marshal importance factors: %w", err)
 	}
 
 	var parentID any
@@ -61,35 +77,35 @@ func (r *MemoryPgRepository) Save(ctx context.Context, record *memory.MemoryReco
 		)`
 
 	_, err = conn.Exec(ctx, query,
-		record.ID.String(),                       // $1
-		string(record.Type),                      // $2
-		record.Content,                           // $3
-		ptrStr(record.Summary),                   // $4
-		record.Tags,                              // $5
-		ptrStr(record.TopicKey),                  // $6
-		record.FTSLanguage,                       // $7
-		ptrStr(record.Scope.TenantID),            // $8
-		record.Scope.ProjectID,                   // $9
-		ptrStr(record.Scope.RepoID),              // $10
-		ptrStr(record.Scope.AgentID),             // $11
-		ptrStr(record.Scope.SessionID),           // $12
-		ptrStr(record.Scope.Environment),         // $13
-		record.Provenance.Source,                  // $14
-		ptrStr(record.Provenance.SourceURI),      // $15
-		string(record.Provenance.Method),         // $16
-		parentID,                                 // $17
-		ptrTime(record.Temporal.ValidFrom),       // $18
-		ptrTime(record.Temporal.ValidUntil),      // $19
-		ptrTime(record.Temporal.LastAccessed),    // $20
-		string(record.Temporal.Freshness),        // $21
-		record.Importance.Score,                  // $22
-		record.Importance.ComputedAt,             // $23
-		factorsJSON,                              // $24
-		string(record.Status),                    // $25
-		ptrStr(record.ArchivedBy),                // $26
-		ptrStr(record.ArchiveReason),             // $27
-		record.CreatedAt,                         // $28
-		record.UpdatedAt,                         // $29
+		record.ID.String(),                    // $1
+		string(record.Type),                   // $2
+		record.Content,                        // $3
+		ptrStr(record.Summary),                // $4
+		record.Tags,                           // $5
+		ptrStr(record.TopicKey),               // $6
+		record.FTSLanguage,                    // $7
+		ptrStr(record.Scope.TenantID),         // $8
+		record.Scope.ProjectID,                // $9
+		ptrStr(record.Scope.RepoID),           // $10
+		ptrStr(record.Scope.AgentID),          // $11
+		ptrStr(record.Scope.SessionID),        // $12
+		ptrStr(record.Scope.Environment),      // $13
+		record.Provenance.Source,              // $14
+		ptrStr(record.Provenance.SourceURI),   // $15
+		string(record.Provenance.Method),      // $16
+		parentID,                              // $17
+		ptrTime(record.Temporal.ValidFrom),    // $18
+		ptrTime(record.Temporal.ValidUntil),   // $19
+		ptrTime(record.Temporal.LastAccessed), // $20
+		string(record.Temporal.Freshness),     // $21
+		record.Importance.Score,               // $22
+		record.Importance.ComputedAt,          // $23
+		factorsJSON,                           // $24
+		string(record.Status),                 // $25
+		ptrStr(record.ArchivedBy),             // $26
+		ptrStr(record.ArchiveReason),          // $27
+		record.CreatedAt,                      // $28
+		record.UpdatedAt,                      // $29
 	)
 
 	if err != nil {
@@ -191,35 +207,35 @@ func (r *MemoryPgRepository) UpsertByTopicKey(
 		RETURNING id, (xmax = 0) AS inserted`
 
 	row := conn.QueryRow(ctx, query,
-		record.ID.String(),                       // $1
-		string(record.Type),                      // $2
-		record.Content,                           // $3
-		ptrStr(record.Summary),                   // $4
-		record.Tags,                              // $5
-		ptrStr(record.TopicKey),                  // $6
-		record.FTSLanguage,                       // $7
-		ptrStr(record.Scope.TenantID),            // $8
-		record.Scope.ProjectID,                   // $9
-		ptrStr(record.Scope.RepoID),              // $10
-		ptrStr(record.Scope.AgentID),             // $11
-		ptrStr(record.Scope.SessionID),           // $12
-		ptrStr(record.Scope.Environment),         // $13
-		record.Provenance.Source,                 // $14
-		ptrStr(record.Provenance.SourceURI),      // $15
-		string(record.Provenance.Method),         // $16
-		parentID,                                 // $17
-		ptrTime(record.Temporal.ValidFrom),       // $18
-		ptrTime(record.Temporal.ValidUntil),      // $19
-		ptrTime(record.Temporal.LastAccessed),    // $20
-		string(record.Temporal.Freshness),        // $21
-		record.Importance.Score,                  // $22
-		record.Importance.ComputedAt,             // $23
-		factorsJSON,                              // $24
-		string(record.Status),                    // $25
-		ptrStr(record.ArchivedBy),                // $26
-		ptrStr(record.ArchiveReason),             // $27
-		record.CreatedAt,                         // $28
-		record.UpdatedAt,                         // $29
+		record.ID.String(),                    // $1
+		string(record.Type),                   // $2
+		record.Content,                        // $3
+		ptrStr(record.Summary),                // $4
+		record.Tags,                           // $5
+		ptrStr(record.TopicKey),               // $6
+		record.FTSLanguage,                    // $7
+		ptrStr(record.Scope.TenantID),         // $8
+		record.Scope.ProjectID,                // $9
+		ptrStr(record.Scope.RepoID),           // $10
+		ptrStr(record.Scope.AgentID),          // $11
+		ptrStr(record.Scope.SessionID),        // $12
+		ptrStr(record.Scope.Environment),      // $13
+		record.Provenance.Source,              // $14
+		ptrStr(record.Provenance.SourceURI),   // $15
+		string(record.Provenance.Method),      // $16
+		parentID,                              // $17
+		ptrTime(record.Temporal.ValidFrom),    // $18
+		ptrTime(record.Temporal.ValidUntil),   // $19
+		ptrTime(record.Temporal.LastAccessed), // $20
+		string(record.Temporal.Freshness),     // $21
+		record.Importance.Score,               // $22
+		record.Importance.ComputedAt,          // $23
+		factorsJSON,                           // $24
+		string(record.Status),                 // $25
+		ptrStr(record.ArchivedBy),             // $26
+		ptrStr(record.ArchiveReason),          // $27
+		record.CreatedAt,                      // $28
+		record.UpdatedAt,                      // $29
 	)
 
 	var (
@@ -237,93 +253,11 @@ func (r *MemoryPgRepository) UpsertByTopicKey(
 	return rid, inserted, nil
 }
 
-// FindActiveByTopicKey retrieves the unique active memory record matching the
-// supplied (scope, topic_key). Scope filtering follows the same NULL-tenant
-// visibility rule as FindByID: a NULL tenant_id on the row is visible to any
-// key in the same project; a non-NULL tenant must match exactly.
-func (r *MemoryPgRepository) FindActiveByTopicKey(
-	ctx context.Context,
-	scope shared.Scope,
-	topicKey string,
-) (*memory.MemoryRecord, error) {
-	conn := getConn(ctx, r.pool)
-
-	const query = `
-		SELECT
-			id, type, content, summary, tags, topic_key, fts_language,
-			tenant_id, project_id, repo_id, agent_id, session_id, environment,
-			source, source_uri, ingest_method, parent_id,
-			valid_from, valid_until, last_accessed, freshness,
-			importance_score, importance_computed_at, importance_factors,
-			status, archived_by, archive_reason,
-			created_at, updated_at
-		FROM memories
-		WHERE topic_key = $1
-		  AND status = 'active'
-		  AND project_id = $2
-		  AND (tenant_id IS NULL OR tenant_id = $3)
-		LIMIT 1`
-
-	row := conn.QueryRow(ctx, query, topicKey, scope.ProjectID, scope.TenantID)
-
-	rec, err := scanMemoryRow(row)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, shared.ErrNotFound
-		}
-		return nil, fmt.Errorf("memory_pg: find_active_by_topic_key: %w", err)
-	}
-	return rec, nil
-}
-
-// FindByID retrieves a MemoryRecord by its ID within the given scope.
-// Returns shared.ErrNotFound if the record does not exist OR belongs to a
-// different project — the two cases are intentionally indistinguishable to
-// prevent existence leaks across project boundaries (see ADR-0005 §P1.5).
-// Returns shared.ErrPurged if the record has been purged.
-//
-// Scope: scope is provided by the application layer from the auth context.
-// The record's scope is NOT used here; only the project_id and tenant_id from
-// the auth context are used as row filters.
-func (r *MemoryPgRepository) FindByID(ctx context.Context, scope shared.Scope, id shared.RecordID) (*memory.MemoryRecord, error) {
-	conn := getConn(ctx, r.pool)
-
-	// Tenant predicate: NULL tenant on the row is visible to any key in the project
-	// (legacy / cross-tenant rows). A non-NULL tenant must match exactly.
-	const query = `
-		SELECT
-			id, type, content, summary, tags, topic_key, fts_language,
-			tenant_id, project_id, repo_id, agent_id, session_id, environment,
-			source, source_uri, ingest_method, parent_id,
-			valid_from, valid_until, last_accessed, freshness,
-			importance_score, importance_computed_at, importance_factors,
-			status, archived_by, archive_reason,
-			created_at, updated_at
-		FROM memories
-		WHERE id = $1
-		  AND project_id = $2
-		  AND (tenant_id IS NULL OR tenant_id = $3)`
-
-	row := conn.QueryRow(ctx, query, id.String(), scope.ProjectID, scope.TenantID)
-
-	rec, err := scanMemoryRow(row)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, shared.ErrNotFound
-		}
-		return nil, fmt.Errorf("memory_pg: find_by_id: %w", err)
-	}
-
-	if rec.Status == shared.MemoryStatusPurged {
-		return nil, shared.ErrPurged
-	}
-	return rec, nil
-}
-
-// scanMemoryRow scans a single memories row into a MemoryRecord. The caller
-// is responsible for handling status-derived semantics (e.g. ErrPurged) and
-// for translating pgx.ErrNoRows into the appropriate domain error.
-func scanMemoryRow(row pgx.Row) (*memory.MemoryRecord, error) {
+// scanMemoryRow scans a row matching memoryColumns into a domain MemoryRecord.
+// Returns shared.ErrPurged for purged records. Caller is responsible for
+// translating "no rows" into shared.ErrNotFound (semantics differ between
+// QueryRow and Query).
+func scanMemoryRow(scanner memoryRowScanner) (*memory.MemoryRecord, error) {
 	var (
 		idStr        string
 		memType      string
@@ -356,7 +290,7 @@ func scanMemoryRow(row pgx.Row) (*memory.MemoryRecord, error) {
 		updatedAt    time.Time
 	)
 
-	if err := row.Scan(
+	if err := scanner.Scan(
 		&idStr, &memType, &content, &summary, &tags, &topicKey, &ftsLanguage,
 		&tenantID, &projectID, &repoID, &agentID, &sessionID, &environment,
 		&source, &sourceURI, &ingestMethod, &parentIDStr,
@@ -366,6 +300,10 @@ func scanMemoryRow(row pgx.Row) (*memory.MemoryRecord, error) {
 		&createdAt, &updatedAt,
 	); err != nil {
 		return nil, err //nolint:wrapcheck // pgx.ErrNoRows sentinel propagated upstream
+	}
+
+	if shared.MemoryStatus(status) == shared.MemoryStatusPurged {
+		return nil, shared.ErrPurged
 	}
 
 	recordID, err := shared.RecordIDFromString(idStr)
@@ -430,6 +368,89 @@ func scanMemoryRow(row pgx.Row) (*memory.MemoryRecord, error) {
 	}, nil
 }
 
+// FindByID retrieves a MemoryRecord by its ID within the given scope.
+// Returns shared.ErrNotFound if the record does not exist OR belongs to a
+// different project — the two cases are intentionally indistinguishable to
+// prevent existence leaks across project boundaries (see ADR-0005 §P1.5).
+// Returns shared.ErrPurged if the record has been purged.
+//
+// Scope: scope is provided by the application layer from the auth context.
+// The record's scope is NOT used here; only the project_id and tenant_id from
+// the auth context are used as row filters.
+func (r *MemoryPgRepository) FindByID(ctx context.Context, scope shared.Scope, id shared.RecordID) (*memory.MemoryRecord, error) {
+	conn := getConn(ctx, r.pool)
+
+	// Tenant predicate: NULL tenant on the row is visible to any key in the project
+	// (legacy / cross-tenant rows). A non-NULL tenant must match exactly.
+	query := `SELECT ` + memoryColumns + ` FROM memories
+		WHERE id = $1
+		  AND project_id = $2
+		  AND (tenant_id IS NULL OR tenant_id = $3)`
+
+	row := conn.QueryRow(ctx, query, id.String(), scope.ProjectID, scope.TenantID)
+
+	rec, err := scanMemoryRow(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, shared.ErrNotFound
+		}
+		return nil, fmt.Errorf("memory_pg: find_by_id: %w", err)
+	}
+
+	return rec, nil
+}
+
+// FindLatestActiveByTopicKey returns the newest active record for a given
+// topic_key within the supplied scope. Optional scope fields, when set,
+// further constrain the match. Returns shared.ErrNotFound when no active
+// record matches.
+//
+// Post-migration-004 (P1.3 partial unique index on
+// (project_id, COALESCE(tenant_id, ''), topic_key) WHERE status='active'),
+// at most one active row can exist per (project_id, tenant_id, topic_key).
+// The ORDER BY / LIMIT 1 is retained for forward-compat with the optional
+// scope filters (repo_id/agent_id/etc) that are NOT part of the uniqueness
+// tuple but still narrow the result set.
+func (r *MemoryPgRepository) FindLatestActiveByTopicKey(
+	ctx context.Context,
+	scope shared.Scope,
+	topicKey string,
+) (*memory.MemoryRecord, error) {
+	conn := getConn(ctx, r.pool)
+
+	query := `SELECT ` + memoryColumns + ` FROM memories
+		WHERE project_id = $1
+		  AND topic_key = $2
+		  AND status = 'active'
+		  AND ($3::text IS NULL OR tenant_id = $3)
+		  AND ($4::text IS NULL OR repo_id = $4)
+		  AND ($5::text IS NULL OR agent_id = $5)
+		  AND ($6::text IS NULL OR session_id = $6)
+		  AND ($7::text IS NULL OR environment = $7)
+		ORDER BY created_at DESC
+		LIMIT 1`
+
+	row := conn.QueryRow(ctx, query,
+		scope.ProjectID,
+		topicKey,
+		ptrStr(scope.TenantID),
+		ptrStr(scope.RepoID),
+		ptrStr(scope.AgentID),
+		ptrStr(scope.SessionID),
+		ptrStr(scope.Environment),
+	)
+
+	rec, err := scanMemoryRow(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, shared.ErrNotFound
+		}
+		return nil, fmt.Errorf("memory_pg: find_latest_active_by_topic_key: %w", err)
+	}
+
+	return rec, nil
+}
+
 // UpdateStatus changes the status of a scoped memory record.
 // Returns shared.ErrNotFound if the record does not exist within scope
 // (including cross-project access — the two cases are indistinguishable).
@@ -460,7 +481,6 @@ func (r *MemoryPgRepository) UpdateStatus(ctx context.Context, scope shared.Scop
 // Returns shared.ErrNotFound if the record does not exist within scope
 // (including cross-project access — the two cases are indistinguishable).
 //
-// Scope: scope is provided by the application layer from the auth context.
 // Scope: scope is provided by the application layer from the auth context.
 // NOTE: scope comes from the purge record's scope (set when the purge was
 // requested), which in turn was validated against the auth context at request

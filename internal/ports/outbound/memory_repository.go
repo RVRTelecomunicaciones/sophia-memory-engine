@@ -12,8 +12,9 @@ import (
 // Scope enforcement contract:
 //   - Save: scope comes from record.Scope; the application layer MUST assert
 //     record.Scope matches the auth context before calling Save.
-//   - FindByID, UpdateStatus, WipeContent: the caller supplies the auth-derived
-//     scope explicitly. The implementation MUST add
+//   - FindByID, FindLatestActiveByTopicKey, UpdateStatus, WipeContent: the
+//     caller supplies the auth-derived scope explicitly. The implementation
+//     MUST add
 //     "AND project_id = $N AND (tenant_id IS NULL OR tenant_id = $M)"
 //     to every SELECT/UPDATE/DELETE. A miss returns shared.ErrNotFound — never
 //     shared.ErrScopeForbidden — to prevent existence leaks.
@@ -38,10 +39,18 @@ type MemoryRepository interface {
 	// different project (cross-project reads look identical to missing rows).
 	FindByID(ctx context.Context, scope shared.Scope, id shared.RecordID) (*memory.MemoryRecord, error)
 
-	// FindActiveByTopicKey retrieves the unique active memory record for a
-	// (scope, topic_key) tuple. Returns shared.ErrNotFound when no active row
-	// matches within the supplied scope.
-	FindActiveByTopicKey(ctx context.Context, scope shared.Scope, topicKey string) (*memory.MemoryRecord, error)
+	// FindLatestActiveByTopicKey returns the newest active record matching the
+	// given topic key within the supplied scope. The scope's ProjectID is
+	// required; any optional scope fields (TenantID, RepoID, AgentID,
+	// SessionID, Environment) further narrow the match. Returns
+	// shared.ErrNotFound when no active record matches.
+	//
+	// Post-migration-004, the (project_id, tenant_id, topic_key) tuple is
+	// unique among active rows, so this returns at most one row when the
+	// optional scope fields are NOT set. Optional fields still further filter
+	// (e.g., repo_id) — callers who over-specify may get ErrNotFound even when
+	// a canonical row exists.
+	FindLatestActiveByTopicKey(ctx context.Context, scope shared.Scope, topicKey string) (*memory.MemoryRecord, error)
 
 	// UpdateStatus transitions the status of a scoped memory record.
 	// Returns shared.ErrNotFound if the record does not exist within scope.
