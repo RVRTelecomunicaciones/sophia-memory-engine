@@ -1,0 +1,82 @@
+name: migrations
+
+# Migrations gate (P0.3 — ADR-0005).
+#
+# Boots a fresh Postgres 16 service container, applies the committed
+# migrations under migrations/postgres/ via the in-tree cmd/migrate binary,
+# then runs the integration test suite against the externally-migrated DB
+# (MEMORY_ENGINE_TEST_DSN path). This proves the committed migrations alone
+# produce every column / index / trigger the persistence adapters require.
+#
+# See docs/migrations-coverage.md for the coverage matrix and drift policy.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  migrate-and-test:
+    name: migrate-and-test (postgres-16)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: dev
+          POSTGRES_PASSWORD: dev
+          POSTGRES_DB: memory_engine
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dev -d memory_engine"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      MEMORY_ENGINE_TEST_DSN: postgres://dev:dev@localhost:5432/memory_engine?sslmode=disable
+      DATABASE_URL: postgres://dev:dev@localhost:5432/memory_engine?sslmode=disable
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go (toolchain pinned in go.mod)
+        uses: actions/setup-go@v5
+        with:
+          # go.mod pins toolchain go1.26.2; the action will honour the
+          # toolchain directive when go-version-file is set.
+          go-version-file: go.mod
+          check-latest: false
+          cache: true
+
+      - name: Show Go version
+        run: go env GOVERSION
+
+      - name: Build cmd/migrate
+        run: go build -o migrate ./cmd/migrate
+
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 30); do
+            if pg_isready -h localhost -p 5432 -U dev -d memory_engine >/dev/null 2>&1; then
+              echo "postgres ready"
+              exit 0
+            fi
+            echo "waiting for postgres... ($i)"
+            sleep 1
+          done
+          echo "postgres did not become ready in 30s" >&2
+          exit 1
+
+      - name: Apply migrations
+        run: ./migrate -dir migrations/postgres -dsn "$DATABASE_URL" up
+
+      - name: Show migration status
+        run: ./migrate -dir migrations/postgres -dsn "$DATABASE_URL" status
+
+      - name: Run integration tests against externally-migrated DB
+        run: go test -tags=integration ./test/integration/... -count=1 -timeout 5m
