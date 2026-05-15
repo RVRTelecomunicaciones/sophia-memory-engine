@@ -1,0 +1,89 @@
+# Default values for sophia-memory-engine.
+# Override via `helm install -f my-values.yaml` or `--set key=value`.
+
+image:
+  repository: ghcr.io/rvrtelecomunicaciones/sophia-memory-engine
+  tag: "0.1.0"
+  # The Dockerfile ships two targets: `memory-engine` (HTTP server) and
+  # `workers` (async retention/purge jobs). This chart wires the HTTP
+  # server target. A sister chart for workers can be added later.
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 8080
+
+resources:
+  limits:
+    cpu: "1"
+    memory: "512Mi"
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+
+config:
+  port: "8080"
+  logLevel: info
+
+# Database connection. In production, prefer External Secrets Operator
+# pulling from Vault/AWS SM/GCP SM rather than committing values here.
+secrets:
+  # Discrete env-var-style entries — memory-engine reads DB_* directly,
+  # not a single DSN string. Match the cmd/migrate runner conventions.
+  dbHost: ""           # e.g. "pg-memory-engine.svc.cluster.local"
+  dbPort: "5432"
+  dbUser: ""
+  dbPassword: ""
+  dbName: ""
+  dbSslMode: "require" # use "disable" only in dev/local
+
+# API key auth. memory-engine validates X-API-Key header against sha256
+# hashes stored at startup. Provide pre-hashed keys here OR rely on a
+# bootstrap migration that seeds the dev key from migrations/postgres.
+# In production the operator typically rotates these out-of-band.
+apiKeys:
+  # Pre-hashed bootstrap key for the orchestator client. Empty disables
+  # bootstrap-key seeding; rely on the consumer creating their own.
+  bootstrapKeySha256: ""
+  bootstrapKeyName: "orchestator"
+
+migrate:
+  # Memory-engine uses an init container with the migrate sidecar
+  # (ghcr.io/golang-migrate/migrate:v4.18.2). Disable if your operator
+  # runs migrations out-of-band (recommended for prod with reviewable
+  # DDL changes).
+  enabled: true
+  image: ghcr.io/golang-migrate/migrate:v4.18.2
+
+probes:
+  liveness:
+    path: /health
+    initialDelaySeconds: 10
+    periodSeconds: 10
+  readiness:
+    path: /ready
+    initialDelaySeconds: 5
+    periodSeconds: 5
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+serviceAccount:
+  create: true
+  name: ""
+
+# Optional Pod-level annotations (e.g. for vault-agent-injector,
+# istio-injection, prometheus.io/scrape).
+podAnnotations: {}
