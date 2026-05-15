@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sophia-memory-engine.fullname" . }}
+  labels:
+    {{- include "sophia-memory-engine.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "sophia-memory-engine.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "sophia-memory-engine.selectorLabels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "sophia-memory-engine.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if .Values.migrate.enabled }}
+      initContainers:
+        # Schema migrations via the standard golang-migrate sidecar.
+        # The migrations directory is bundled INTO this container at
+        # /migrations by the build pipeline; if your image doesn't
+        # include them, mount via an emptyDir + git-sync or similar.
+        - name: migrate
+          image: {{ .Values.migrate.image }}
+          args:
+            - "-path=/migrations"
+            - "-database=postgres://$(DB_USER):$(DB_PASSWORD)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)?sslmode=$(DB_SSLMODE)"
+            - "up"
+          envFrom:
+            - secretRef:
+                name: {{ include "sophia-memory-engine.fullname" . }}-secrets
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+              readOnly: true
+      volumes:
+        - name: migrations
+          # The runtime container ships migrations under
+          # /var/memory/migrations/postgres (per the Dockerfile env
+          # MEMORY_ENGINE_MIGRATIONS_PATH). Operators that want a
+          # different mount strategy override `migrate.enabled=false`
+          # and run migrations out-of-band.
+          emptyDir: {}
+      {{- end }}
+      containers:
+        - name: memory-engine
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            - name: PORT
+              value: {{ .Values.config.port | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+          envFrom:
+            - secretRef:
+                name: {{ include "sophia-memory-engine.fullname" . }}-secrets
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

@@ -1,0 +1,15 @@
+apiVersion: v2
+name: sophia-memory-engine
+description: Knowledge layer for the Sophia ecosystem (memories + decisions + heuristics + relations + retrieval + purge)
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - memory
+  - knowledge-base
+  - sophia
+  - ai-agents
+home: https://github.com/RVRTelecomunicaciones/sophia-memory-engine
+maintainers:
+  - name: rfactperu
+    email: rfactperu@gmail.com
