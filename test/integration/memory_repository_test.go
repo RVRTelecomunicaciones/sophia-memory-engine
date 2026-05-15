@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/sophia-engine/memory-engine/internal/adapters/outbound/persistence"
 	"github.com/sophia-engine/memory-engine/internal/domain/memory"
 	"github.com/sophia-engine/memory-engine/internal/domain/shared"
@@ -15,6 +16,23 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// truncateMemoriesAfter is a helper that registers a t.Cleanup to TRUNCATE
+// the `memories` table after the test finishes. The CI integration job
+// reuses ONE pre-migrated Postgres database across all tests in this
+// package (see testhelper.SetupTestDB), so without explicit cleanup a
+// row left active by an earlier test collides with the partial unique
+// index `idx_memories_topic_key_active_unique` (migration 004) when
+// the next test tries to insert with the same (project_id, topic_key).
+//
+// CASCADE drops dependent rows in `memory_relations` etc. so the table
+// remains in a fresh state for the next test.
+func truncateMemoriesAfter(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), "TRUNCATE memories CASCADE")
+	})
+}
 
 // memoryFixture builds a semantic memory record with the given topic key,
 // project, and creation time so tests can assert ordering and scope.
@@ -50,6 +68,7 @@ func TestMemoryRepository_FindLatestActiveByTopicKey_ReturnsLatestUpsert(t *test
 	// goes through UpsertByTopicKey which UPDATEs the existing active row
 	// in-place. This test exercises that exact flow.
 	pool := testhelper.SetupTestDB(t)
+	truncateMemoriesAfter(t, pool)
 	repo := persistence.NewMemoryPgRepository(pool)
 	ctx := context.Background()
 
@@ -83,6 +102,7 @@ func TestMemoryRepository_FindLatestActiveByTopicKey_ExcludesArchived(t *testing
 	// of that flow (no upsert path) and validates that archived rows are
 	// correctly excluded from FindLatestActiveByTopicKey.
 	pool := testhelper.SetupTestDB(t)
+	truncateMemoriesAfter(t, pool)
 	repo := persistence.NewMemoryPgRepository(pool)
 	ctx := context.Background()
 
@@ -109,6 +129,7 @@ func TestMemoryRepository_FindLatestActiveByTopicKey_ExcludesArchived(t *testing
 
 func TestMemoryRepository_FindLatestActiveByTopicKey_ProjectIsolation(t *testing.T) {
 	pool := testhelper.SetupTestDB(t)
+	truncateMemoriesAfter(t, pool)
 	repo := persistence.NewMemoryPgRepository(pool)
 	ctx := context.Background()
 
@@ -150,6 +171,7 @@ func TestMemoryRepository_FindLatestActiveByTopicKey_OptionalScopeFilter(t *test
 	// row: the query must honor `scope.RepoID` when set and reject other
 	// repos.
 	pool := testhelper.SetupTestDB(t)
+	truncateMemoriesAfter(t, pool)
 	repo := persistence.NewMemoryPgRepository(pool)
 	ctx := context.Background()
 
