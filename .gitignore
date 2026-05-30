@@ -31,3 +31,7 @@ coverage.html
 
 # Compiled migrate binary (source lives in cmd/migrate/)
 /migrate
+
+# AI session artifacts (transient, not part of the project)
+.claude/
+memory-engine.txt
