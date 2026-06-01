@@ -127,7 +127,6 @@ Additional registered routes (also live in Phase 1):
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `GET` | `/api/v1/memories/by-topic-key` | (see core) |
 | `GET` | `/api/v1/decisions/{id}` | Fetch a decision |
 | `GET` | `/api/v1/decisions/history/{key}` | Decision version history |
 | `POST` | `/api/v1/decisions/{id}/contradict` | Mark a decision contradicted |
