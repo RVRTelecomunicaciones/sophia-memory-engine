@@ -65,8 +65,8 @@ func TestNewMemoryRecord_Episodic_Valid(t *testing.T) {
 	if m.Status != shared.MemoryStatusActive {
 		t.Errorf("expected active status, got %s", m.Status)
 	}
-	if m.FTSLanguage != "spanish" {
-		t.Errorf("expected spanish FTS language, got %s", m.FTSLanguage)
+	if m.FTSLanguage != "simple" {
+		t.Errorf("expected simple FTS language, got %s", m.FTSLanguage)
 	}
 	if m.Temporal.ValidFrom == nil {
 		t.Fatal("expected ValidFrom to be set")

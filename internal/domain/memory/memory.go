@@ -116,7 +116,7 @@ func NewMemoryRecord(
 		Temporal:    shared.TemporalMetadata{Freshness: shared.FreshnessLevelFresh},
 		Importance:  shared.DefaultImportanceScore(now),
 		Status:      shared.MemoryStatusActive,
-		FTSLanguage: "spanish",
+		FTSLanguage: "simple",
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
