@@ -107,14 +107,14 @@ func (idx *PostgresFTSIndex) Search(ctx context.Context, query outbound.FTSQuery
 
 	sql := fmt.Sprintf(`
 		SELECT id, 'memory' AS record_type,
-			ts_rank(search_vector, plainto_tsquery('spanish', $1)) AS rank,
+			ts_rank(search_vector, plainto_tsquery('simple', $1)) AS rank,
 			similarity(content, $1) AS trgm_score,
-			ts_headline('spanish', content, plainto_tsquery('spanish', $1),
+			ts_headline('simple', content, plainto_tsquery('simple', $1),
 				'StartSel=**,StopSel=**,MaxWords=35,MinWords=15') AS snippet
 		FROM memories
 		WHERE project_id = $2
 			AND status = 'active'
-			AND (search_vector @@ plainto_tsquery('spanish', $1)
+			AND (search_vector @@ plainto_tsquery('simple', $1)
 				OR similarity(content, $1) > $3)
 			%s`,
 		strings.Join(filters, "\n\t\t\t"))
