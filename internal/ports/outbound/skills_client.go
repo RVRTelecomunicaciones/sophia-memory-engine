@@ -86,3 +86,25 @@ type SkillsClient interface {
 	// GetUsage returns all skill_usage rows for the given change_id.
 	GetUsage(ctx context.Context, changeID string) ([]SkillUsageRow, error)
 }
+
+// ProposerSkillView is the wider snapshot used ONLY by the governance proposer.
+// It embeds the narrow SkillSnapshot (used by the worker's status-transition path)
+// and adds the additive fields served by orch's GET /api/v1/skills/{id} since M3 (D-M3-2).
+// Go's default json.Unmarshal silently drops unknown fields when decoding into
+// the narrow SkillSnapshot, so the worker's existing decode path is unaffected.
+type ProposerSkillView struct {
+	SkillSnapshot
+	SkillName   string         `json:"skill_name"`
+	Scope       map[string]any `json:"scope"`
+	AppliesWhen map[string]any `json:"applies_when"`
+}
+
+// ProposerSkillsClient is the governance proposer's outbound port for fetching
+// the richer skill view. It is a separate interface from SkillsClient so the
+// worker's narrow GetSkill path is never widened (D-M3-2).
+type ProposerSkillsClient interface {
+	// GetSkillWide returns the full proposer view of the named skill, including
+	// the additive fields (skill_name, scope, applies_when) not present in
+	// SkillSnapshot. Returns *HTTPStatusError on 4xx.
+	GetSkillWide(ctx context.Context, skillID string) (*ProposerSkillView, error)
+}

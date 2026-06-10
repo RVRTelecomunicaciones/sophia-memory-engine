@@ -243,5 +243,61 @@ func (c *SkillsClientHTTP) checkStatus(resp *http.Response) error {
 	}
 }
 
+// wideSkillResponse is the wider JSON decode shape for GET /api/v1/skills/{id}.
+// It extends the narrow SkillSnapshot with the additive orch fields served since M3.
+// Only used by the proposer path; the worker's GetSkill path still decodes into
+// the narrow outbound.SkillSnapshot.
+type wideSkillResponse struct {
+	SkillID     string         `json:"skill_id"`
+	Status      string         `json:"status"`
+	RiskLevel   string         `json:"risk_level"`
+	Version     string         `json:"version"`
+	Metrics     outbound.SkillMetrics `json:"metrics"`
+	SkillName   string         `json:"skill_name"`
+	Scope       map[string]any `json:"scope"`
+	AppliesWhen map[string]any `json:"applies_when"`
+}
+
+// GetSkillWide implements outbound.ProposerSkillsClient.
+// It calls GET /api/v1/skills/{id} and decodes the richer response shape into
+// an outbound.ProposerSkillView, making the additive fields (skill_name, scope,
+// applies_when) available to the proposer without changing the narrow SkillSnapshot type.
+func (c *SkillsClientHTTP) GetSkillWide(ctx context.Context, skillID string) (*outbound.ProposerSkillView, error) {
+	url := fmt.Sprintf("%s/api/v1/skills/%s", c.baseURL, skillID)
+	req, err := c.newRequest(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("orchhttp.GetSkillWide: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if err := c.checkStatus(resp); err != nil {
+		return nil, err
+	}
+
+	var wide wideSkillResponse
+	if err := json.NewDecoder(resp.Body).Decode(&wide); err != nil {
+		return nil, fmt.Errorf("orchhttp.GetSkillWide: decode response: %w", err)
+	}
+	return &outbound.ProposerSkillView{
+		SkillSnapshot: outbound.SkillSnapshot{
+			SkillID:   wide.SkillID,
+			Status:    wide.Status,
+			RiskLevel: wide.RiskLevel,
+			Version:   wide.Version,
+			Metrics:   wide.Metrics,
+		},
+		SkillName:   wide.SkillName,
+		Scope:       wide.Scope,
+		AppliesWhen: wide.AppliesWhen,
+	}, nil
+}
+
 // compile-time guard: *SkillsClientHTTP must satisfy outbound.SkillsClient.
 var _ outbound.SkillsClient = (*SkillsClientHTTP)(nil)
+
+// compile-time guard: *SkillsClientHTTP must satisfy outbound.ProposerSkillsClient.
+var _ outbound.ProposerSkillsClient = (*SkillsClientHTTP)(nil)
