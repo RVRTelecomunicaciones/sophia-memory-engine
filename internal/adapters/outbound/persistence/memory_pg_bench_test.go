@@ -264,7 +264,7 @@ func Benchmark_FindActiveByTopicKey(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			tk := fmt.Sprintf("sdd/p2.3/topic-%05d", (i*97)%seedSize)
-			_, err := repo.FindActiveByTopicKey(ctx, scope, tk)
+			_, err := repo.FindLatestActiveByTopicKey(ctx, scope, tk)
 			if err != nil && !errors.Is(err, shared.ErrNotFound) {
 				b.Fatalf("find: %v", err)
 			}

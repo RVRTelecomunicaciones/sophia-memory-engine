@@ -5,6 +5,7 @@ package integration
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -127,8 +128,16 @@ func splitSkillPath(path string) []string {
 	return []string{rest}
 }
 
-// buildPipeline creates a Handler with real memory client + fake orch httptest server.
-func buildPipeline(t *testing.T, fakeOrch *fakeOrchServer) (*consolidation.HandlerV2, func()) {
+// pipelineEnv bundles what integration tests need to inspect after Handle().
+type pipelineEnv struct {
+	handler *consolidation.HandlerV2
+	memRepo *persistence.MemoryPgRepository
+	scope   shared.Scope
+	cleanup func()
+}
+
+// buildPipeline creates a HandlerV2 with real memory client + fake orch httptest server.
+func buildPipeline(t *testing.T, fakeOrch *fakeOrchServer) pipelineEnv {
 	t.Helper()
 
 	pool := testhelper.SetupTestDB(t)
@@ -143,6 +152,8 @@ func buildPipeline(t *testing.T, fakeOrch *fakeOrchServer) (*consolidation.Handl
 	memorySvc := ingest.NewService(memRepo, searchIdx, eventPub, clock)
 	memClient := consolidation.NewMemoryServiceClient(memorySvc, "test-project", clock)
 
+	scope, _ := shared.NewScope("test-project")
+
 	// Skills HTTP client.
 	srv := httptest.NewServer(fakeOrch.handler())
 	skillsClient, err := orchhttp.NewSkillsClientWithOptions(srv.URL, "test-key", orchhttp.Options{
@@ -152,8 +163,13 @@ func buildPipeline(t *testing.T, fakeOrch *fakeOrchServer) (*consolidation.Handl
 	})
 	require.NoError(t, err)
 
-	h := consolidation.NewHandlerV2(nil, clock, memClient, skillsClient)
-	return h, func() { srv.Close() }
+	h := consolidation.NewHandlerV2(slog.Default(), clock, memClient, skillsClient)
+	return pipelineEnv{
+		handler: h,
+		memRepo: memRepo,
+		scope:   scope,
+		cleanup: func() { srv.Close() },
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -165,12 +181,12 @@ func TestConsolidationPipeline_HappyPath(t *testing.T) {
 	fake := &fakeOrchServer{
 		getUsageRows: []outbound.SkillUsageRow{
 			{
-				SkillUsageID: "row-1",
-				ChangeID:     "change-happy",
+				SkillUsageID:  "row-1",
+				ChangeID:      "change-happy",
 				PhaseType:    "apply",
-				SkillID:      "skill-happy",
-				SkillVersion: "v1",
-				Outcome:      "success",
+				SkillID:       "skill-happy",
+				SkillVersion:  "v1",
+				Outcome:       "success",
 				ApplyAttempts: 1,
 			},
 		},
@@ -185,8 +201,8 @@ func TestConsolidationPipeline_HappyPath(t *testing.T) {
 		},
 	}
 
-	h, cleanup := buildPipeline(t, fake)
-	defer cleanup()
+	env := buildPipeline(t, fake)
+	defer env.cleanup()
 
 	payload := consolidation.PhaseArchivedReceived{
 		ChangeID:   "change-happy",
@@ -195,18 +211,15 @@ func TestConsolidationPipeline_HappyPath(t *testing.T) {
 		ArchivedAt: time.Now(),
 	}
 
-	err := h.Handle(context.Background(), payload)
+	err := env.handler.Handle(context.Background(), payload)
 	require.NoError(t, err)
 
-	// PatchMetrics must have been called.
+	// PatchMetrics must have been called once (one skill).
 	assert.Equal(t, int32(1), atomic.LoadInt32(&fake.patchMetricsCalls),
 		"PatchMetrics must be called for each skill")
 
-	// Digest must be persisted in memory-engine (HasTopic should return true now).
-	pool := testhelper.SetupTestDB(t)
-	memRepo := persistence.NewMemoryPgRepository(pool)
-	scope, _ := shared.NewScope("test-project")
-	rec, err := memRepo.FindLatestActiveByTopicKey(context.Background(), "digest/change-happy", scope)
+	// Digest must be persisted in memory-engine.
+	rec, err := env.memRepo.FindLatestActiveByTopicKey(context.Background(), env.scope, "digest/change-happy")
 	require.NoError(t, err, "digest must exist in memory after pipeline")
 	assert.NotNil(t, rec)
 }
@@ -226,8 +239,8 @@ func TestConsolidationPipeline_PartialFailure_ContinuesAndPersistsDigest(t *test
 		patchMetricsErrors: map[string]int{"skill-A": http.StatusInternalServerError},
 	}
 
-	h, cleanup := buildPipeline(t, fake)
-	defer cleanup()
+	env := buildPipeline(t, fake)
+	defer env.cleanup()
 
 	payload := consolidation.PhaseArchivedReceived{
 		ChangeID:   "change-partial",
@@ -236,18 +249,17 @@ func TestConsolidationPipeline_PartialFailure_ContinuesAndPersistsDigest(t *test
 		ArchivedAt: time.Now(),
 	}
 
-	err := h.Handle(context.Background(), payload)
+	err := env.handler.Handle(context.Background(), payload)
 	require.NoError(t, err, "pipeline must not fail when one skill fails")
 
-	// skill-B must still be processed.
-	assert.GreaterOrEqual(t, int32(1), int32(3),
-		"at most 3 PatchMetrics attempts (1 retry exhausted for skill-A + 1 for skill-B)")
+	// skill-B must be processed (1 successful PatchMetrics call for skill-B);
+	// skill-A exhausted its retries (1 attempt with MaxRetries=1 means 1 attempt total).
+	calls := atomic.LoadInt32(&fake.patchMetricsCalls)
+	assert.Equal(t, int32(1), calls,
+		"only skill-B PatchMetrics should succeed; skill-A returns 500 and is skipped")
 
-	// Digest must still be persisted.
-	pool := testhelper.SetupTestDB(t)
-	memRepo := persistence.NewMemoryPgRepository(pool)
-	scope, _ := shared.NewScope("test-project")
-	rec, err := memRepo.FindLatestActiveByTopicKey(context.Background(), "digest/change-partial", scope)
+	// Digest must still be persisted despite skill-A failure.
+	rec, err := env.memRepo.FindLatestActiveByTopicKey(context.Background(), env.scope, "digest/change-partial")
 	require.NoError(t, err, "digest must persist even when a skill fails")
 	assert.NotNil(t, rec)
 }
@@ -264,8 +276,8 @@ func TestConsolidationPipeline_ReReceive_NoOp(t *testing.T) {
 		skillSnap: map[string]outbound.SkillSnapshot{},
 	}
 
-	h, cleanup := buildPipeline(t, fake)
-	defer cleanup()
+	env := buildPipeline(t, fake)
+	defer env.cleanup()
 
 	payload := consolidation.PhaseArchivedReceived{
 		ChangeID:   "change-idem",
@@ -274,12 +286,12 @@ func TestConsolidationPipeline_ReReceive_NoOp(t *testing.T) {
 		ArchivedAt: time.Now(),
 	}
 
-	// First invocation.
-	require.NoError(t, h.Handle(context.Background(), payload))
+	// First invocation — must process and write digest.
+	require.NoError(t, env.handler.Handle(context.Background(), payload))
 	firstCount := atomic.LoadInt32(&fake.patchMetricsCalls)
 
-	// Second invocation — must be no-op.
-	require.NoError(t, h.Handle(context.Background(), payload))
+	// Second invocation — idempotency guard must skip; no additional PatchMetrics calls.
+	require.NoError(t, env.handler.Handle(context.Background(), payload))
 	secondCount := atomic.LoadInt32(&fake.patchMetricsCalls)
 
 	assert.Equal(t, firstCount, secondCount,
