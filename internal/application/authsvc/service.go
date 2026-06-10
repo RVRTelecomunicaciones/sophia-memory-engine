@@ -79,9 +79,8 @@ func (s *Service) Authenticate(ctx context.Context, plaintextKey string) (auth.A
 	go func() {
 		touchCtx, cancel := context.WithTimeout(context.Background(), touchTimeout)
 		defer cancel()
-		if err := repo.TouchLastUsed(touchCtx, keyID, now); err != nil {
-			// Already logged inside TouchLastUsed; do not 401 on a stats write failure.
-		}
+		// Already logged inside TouchLastUsed; do not 401 on a stats write failure.
+		_ = repo.TouchLastUsed(touchCtx, keyID, now)
 	}()
 
 	// Step 6: return context payload.

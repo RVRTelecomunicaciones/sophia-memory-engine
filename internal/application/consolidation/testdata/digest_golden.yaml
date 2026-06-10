@@ -1,0 +1,22 @@
+change_id: change-gold
+project_id: proj-1
+duration_seconds: 120
+phases:
+    - phase: apply
+      status: done
+      attempts: 2
+      retry_reasons:
+        - env error
+    - phase: explore
+      status: done
+      attempts: 1
+    - phase: spec
+      status: done
+      attempts: 1
+skills_used:
+    - skill_id: aaa-skill
+      outcome: success
+    - skill_id: mmm-skill
+      outcome: failure
+    - skill_id: zzz-skill
+      outcome: success

@@ -399,7 +399,7 @@ func (r *RelationPgRepository) Traverse(ctx context.Context, query outbound.Trav
 	if fanout > 0 {
 		fanoutParam := fmt.Sprintf("$%d", paramIdx)
 		args = append(args, fanout)
-		paramIdx++
+		paramIdx++ //nolint:ineffassign // keep for future params consistency
 
 		finalSelect = fmt.Sprintf(`
 ranked AS (

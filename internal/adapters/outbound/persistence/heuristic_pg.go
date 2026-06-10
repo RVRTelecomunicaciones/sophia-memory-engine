@@ -144,7 +144,7 @@ func (r *HeuristicPgRepository) FindActiveByKey(ctx context.Context, key string,
 	if scope.Environment != nil {
 		conditions = append(conditions, fmt.Sprintf("environment = $%d", idx))
 		args = append(args, *scope.Environment)
-		idx++
+		idx++ //nolint:ineffassign // keep for consistency with the dynamic-query builder pattern
 	}
 
 	query := fmt.Sprintf(`
@@ -201,7 +201,7 @@ func (r *HeuristicPgRepository) FindByScope(ctx context.Context, scope shared.Sc
 	if enabled != nil {
 		conditions = append(conditions, fmt.Sprintf("enabled = $%d", idx))
 		args = append(args, *enabled)
-		idx++
+		idx++ //nolint:ineffassign // keep for consistency with the dynamic-query builder pattern
 	}
 
 	query := fmt.Sprintf(`

@@ -150,6 +150,7 @@ func buildLiveRouter() chi.Router {
 		noopFeedbackSvc{},
 		noopAuthSvc{},
 		noopDBPinger{},
+		nil, // workerPipeline: nil disables the worker route in spec drift test
 	)
 }
 
