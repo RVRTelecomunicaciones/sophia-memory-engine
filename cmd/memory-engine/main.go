@@ -103,7 +103,12 @@ func main() {
 	authSvc := authsvc.NewService(apiKeyRepo, clock)
 
 	// HTTP.
-	router := apphttp.NewRouter(memorySvc, decisionSvc, heuristicSvc, relationSvc, searchSvc, ctxBuilder, purgeSvc, feedbackSvc, authSvc, pool)
+	// workerPipeline is nil here — the consolidation worker pipeline is wired
+	// when SOPHIA_MEMORY_WORKER_ENABLED is set (see cmd/workers or future
+	// bootstrap config). The webhook receiver registers automatically when
+	// a non-nil pipeline is provided. Per locked decision N.5 the endpoint
+	// lives in this main HTTP server; cmd/workers stays minimal.
+	router := apphttp.NewRouter(memorySvc, decisionSvc, heuristicSvc, relationSvc, searchSvc, ctxBuilder, purgeSvc, feedbackSvc, authSvc, pool, nil)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	server := &gohttp.Server{

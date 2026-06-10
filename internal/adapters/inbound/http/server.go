@@ -18,6 +18,11 @@ import (
 // it reuses the application's pgxpool rather than opening a new connection.
 //
 // authSvc gates every route under /api/v1; /health and /ready stay public.
+//
+// workerPipeline is optional (nil = skip worker routes). When non-nil,
+// POST /api/v1/worker/phase-archived is registered under the API-key middleware.
+// Per locked decision N.5 the webhook receiver lives in this main HTTP server,
+// not in cmd/workers — cmd/workers stays minimal pending scheduler work.
 func NewRouter(
 	memorySvc inbound.MemoryService,
 	decisionSvc inbound.DecisionService,
@@ -29,6 +34,7 @@ func NewRouter(
 	feedbackSvc inbound.FeedbackService,
 	authSvc inbound.AuthService,
 	db DBPinger,
+	workerPipeline PhaseArchivedHandler,
 ) chi.Router {
 	r := chi.NewRouter()
 	// TraceW3C MUST run FIRST (before APIKey and any other middleware) so:
@@ -80,6 +86,13 @@ func NewRouter(
 
 		feedbackHandler := NewFeedbackHandler(feedbackSvc)
 		r.Post("/feedback", feedbackHandler.Submit)
+
+		// Worker webhook receiver (D-M2-1, N.5): lives in main HTTP server.
+		// The cmd/workers binary stays minimal pending scheduler work.
+		if workerPipeline != nil {
+			workerH := NewWorkerHandler(workerPipeline)
+			r.Post("/worker/phase-archived", workerH.PhaseArchived)
+		}
 	})
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
