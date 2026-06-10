@@ -255,7 +255,7 @@ func TestProposer_ReEmitWithWideFields_AllNineFieldsPresent(t *testing.T) {
 	// Second emission — same skill, new change_id.
 	snap.Metrics.UsageCount = 7
 	wide2 := defaultWideResult("skill-re-emit-wide")
-	wide2.SkillSnapshot.Metrics.UsageCount = 7
+	wide2.Metrics.UsageCount = 7
 	skillsCli.wideResult = wide2
 	require.NoError(t, p.Emit(context.Background(), snap, "change-second"))
 	require.Len(t, mem.ingested, 2, "proposer upserts by calling Ingest twice with same topic_key")
