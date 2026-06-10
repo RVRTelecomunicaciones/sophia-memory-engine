@@ -128,7 +128,7 @@ func (c *SkillsClientHTTP) GetSkill(ctx context.Context, skillID string) (*outbo
 	if err != nil {
 		return nil, fmt.Errorf("orchhttp.GetSkill: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if err := c.checkStatus(resp); err != nil {
 		return nil, err
@@ -153,7 +153,7 @@ func (c *SkillsClientHTTP) GetUsage(ctx context.Context, changeID string) ([]out
 	if err != nil {
 		return nil, fmt.Errorf("orchhttp.GetUsage: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if err := c.checkStatus(resp); err != nil {
 		return nil, err
@@ -191,7 +191,7 @@ func (c *SkillsClientHTTP) doWithRetry(ctx context.Context, method, url string, 
 			lastErr = fmt.Errorf("orchhttp: request failed: %w", err)
 			continue
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		// 4xx: do not retry — return typed error immediately.
 		if resp.StatusCode >= 400 && resp.StatusCode < 500 {

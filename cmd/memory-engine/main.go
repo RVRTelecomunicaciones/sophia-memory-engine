@@ -12,9 +12,11 @@ import (
 	"syscall"
 
 	apphttp "github.com/sophia-engine/memory-engine/internal/adapters/inbound/http"
+	"github.com/sophia-engine/memory-engine/internal/adapters/outbound/orchhttp"
 	"github.com/sophia-engine/memory-engine/internal/adapters/outbound/persistence"
 	"github.com/sophia-engine/memory-engine/internal/adapters/outbound/search"
 	"github.com/sophia-engine/memory-engine/internal/application/authsvc"
+	"github.com/sophia-engine/memory-engine/internal/application/consolidation"
 	"github.com/sophia-engine/memory-engine/internal/application/decisions"
 	"github.com/sophia-engine/memory-engine/internal/application/feedback"
 	"github.com/sophia-engine/memory-engine/internal/application/heuristics"
@@ -103,12 +105,36 @@ func main() {
 	authSvc := authsvc.NewService(apiKeyRepo, clock)
 
 	// HTTP.
-	// workerPipeline is nil here — the consolidation worker pipeline is wired
-	// when SOPHIA_MEMORY_WORKER_ENABLED is set (see cmd/workers or future
-	// bootstrap config). The webhook receiver registers automatically when
-	// a non-nil pipeline is provided. Per locked decision N.5 the endpoint
-	// lives in this main HTTP server; cmd/workers stays minimal.
-	router := apphttp.NewRouter(memorySvc, decisionSvc, heuristicSvc, relationSvc, searchSvc, ctxBuilder, purgeSvc, feedbackSvc, authSvc, pool, nil)
+	// N.6 / D-M2-1 / locked decision N.5:
+	// The consolidation worker webhook receiver lives in this main HTTP server.
+	// When SOPHIA_MEMORY_WORKER_ENABLED=true the full HandlerV2 pipeline is wired;
+	// otherwise the route is not registered (nil pipeline).
+	// SOPHIA_ORCH_BASE_URL and SOPHIA_ORCH_API_KEY must also be set when enabled.
+	var workerPipeline apphttp.PhaseArchivedHandler
+	if os.Getenv("SOPHIA_MEMORY_WORKER_ENABLED") == "true" {
+		orchURL := os.Getenv("SOPHIA_ORCH_BASE_URL")
+		orchKey := os.Getenv("SOPHIA_ORCH_API_KEY")
+		workerProjectID := os.Getenv("SOPHIA_WORKER_PROJECT_ID")
+		if workerProjectID == "" {
+			workerProjectID = "default"
+		}
+		skillsClient, err := orchhttp.NewSkillsClient(orchURL, orchKey)
+		if err != nil {
+			slog.Error("consolidation worker: failed to create orch skills client", "error", err)
+			os.Exit(1)
+		}
+		memClient := consolidation.NewMemoryServiceClient(memorySvc, workerProjectID, clock)
+		workerPipeline = consolidation.NewHandlerV2(logger, clock, memClient, skillsClient).
+			WithPromoter(consolidation.NewPromoter()).
+			WithDemoter(consolidation.NewDemoter()).
+			WithProposer(consolidation.NewProposer(memClient, clock))
+		slog.Info("consolidation worker pipeline enabled",
+			"project_id", workerProjectID,
+			"orch_url", orchURL,
+		)
+	}
+
+	router := apphttp.NewRouter(memorySvc, decisionSvc, heuristicSvc, relationSvc, searchSvc, ctxBuilder, purgeSvc, feedbackSvc, authSvc, pool, workerPipeline)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	server := &gohttp.Server{
