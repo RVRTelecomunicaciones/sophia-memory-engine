@@ -40,6 +40,16 @@ func (f *fakeMemoryClient) HasTopic(_ context.Context, topicKey string) (bool, e
 	return f.existing[topicKey], nil
 }
 
+func (f *fakeMemoryClient) ReadContent(_ context.Context, topicKey string) (string, error) {
+	// Return the last ingested content for this topic_key, if any.
+	for i := len(f.ingested) - 1; i >= 0; i-- {
+		if f.ingested[i].TopicKey == topicKey {
+			return f.ingested[i].Content, nil
+		}
+	}
+	return "", nil
+}
+
 func (f *fakeMemoryClient) Ingest(_ context.Context, req consolidation.IngestRequest) error {
 	if f.ingestErr != nil {
 		return f.ingestErr
