@@ -218,6 +218,54 @@ func TestBuildDigest_DeterministicYAML(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Group L: golden fixture reflects the unknown-outcome filter (D-LH-4).
+// A known envelope including one `unknown` skill is filtered before BuildDigest;
+// the resulting YAML must match the regenerated golden fixture byte-for-byte and
+// must OMIT the unknown entry while sorting phases/skills ascending.
+// ---------------------------------------------------------------------------
+
+func TestBuildDigest_GoldenFixture_OmitsUnknown(t *testing.T) {
+	// Same envelope as the golden fixture, plus one `unknown` skill that the
+	// filter must drop. Skills/phases are intentionally unsorted on input.
+	rawSkills := []consolidation.DigestSkill{
+		{SkillID: "zzz-skill", Outcome: "success"},
+		{SkillID: "ddd-skill", Outcome: "unknown"}, // dropped by filter
+		{SkillID: "aaa-skill", Outcome: "success"},
+		{SkillID: "mmm-skill", Outcome: "failure"},
+	}
+
+	input := consolidation.ChangeDigest{
+		ChangeID:        "change-gold",
+		ProjectID:       "proj-1",
+		DurationSeconds: 120,
+		Phases: []consolidation.DigestPhase{
+			{Phase: "spec", Status: "done", Attempts: 1},
+			{Phase: "apply", Status: "done", Attempts: 2, RetryReasons: []string{"env error"}},
+			{Phase: "explore", Status: "done", Attempts: 1},
+		},
+		SkillsUsed: consolidation.FilterDigestSkills(rawSkills),
+	}
+
+	got, err := consolidation.BuildDigest(input)
+	require.NoError(t, err)
+
+	// The unknown entry must not survive serialization.
+	assert.NotContains(t, got, "ddd-skill", "unknown-outcome skill must be filtered out")
+	assert.NotContains(t, got, "unknown", "no unknown outcome should appear in the digest")
+
+	goldenPath := filepath.Join("testdata", "digest_golden.yaml")
+	if os.Getenv("UPDATE_GOLDEN") == "1" {
+		require.NoError(t, os.MkdirAll("testdata", 0750))
+		require.NoError(t, os.WriteFile(goldenPath, []byte(got), 0600))
+		t.Log("golden fixture regenerated; re-run without UPDATE_GOLDEN to compare")
+		return
+	}
+	golden, err := os.ReadFile(goldenPath)
+	require.NoError(t, err)
+	assert.Equal(t, string(golden), got, "filtered digest YAML must match golden fixture byte-for-byte")
+}
+
+// ---------------------------------------------------------------------------
 // J.5: digest persisted via Ingest with correct topic_key/type/tags
 // ---------------------------------------------------------------------------
 
