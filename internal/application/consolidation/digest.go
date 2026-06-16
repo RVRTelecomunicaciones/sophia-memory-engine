@@ -27,6 +27,19 @@ type DigestPhase struct {
 	RetryReasons []string `yaml:"retry_reasons,omitempty"`
 }
 
+// Digest outcome values for a per-skill entry in the change digest.
+// Shared by the producer (handler step 4-9) and the FilterDigestSkills
+// consumer so the literals cannot drift apart.
+const (
+	// OutcomeSuccess marks a skill whose post-patch state was read cleanly.
+	OutcomeSuccess = "success"
+	// OutcomeFailure marks a skill whose PatchMetrics step failed.
+	OutcomeFailure = "failure"
+	// OutcomeUnknown marks a GetSkill-failed / corrupt row. Filtered out of
+	// the persisted digest (D-LH-4).
+	OutcomeUnknown = "unknown"
+)
+
 // DigestSkill captures per-skill outcome in the change.
 type DigestSkill struct {
 	SkillID string `yaml:"skill_id"`

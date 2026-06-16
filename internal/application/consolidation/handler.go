@@ -170,7 +170,7 @@ func (h *HandlerV2) Handle(ctx context.Context, payload PhaseArchivedReceived) e
 					slog.String("skill_id", d.SkillID),
 					slog.String("error", err.Error()),
 				)
-				digestSkills = append(digestSkills, DigestSkill{SkillID: d.SkillID, Outcome: "failure"})
+				digestSkills = append(digestSkills, DigestSkill{SkillID: d.SkillID, Outcome: OutcomeFailure})
 				return
 			}
 
@@ -181,7 +181,7 @@ func (h *HandlerV2) Handle(ctx context.Context, payload PhaseArchivedReceived) e
 					slog.String("skill_id", d.SkillID),
 					slog.String("error", err.Error()),
 				)
-				digestSkills = append(digestSkills, DigestSkill{SkillID: d.SkillID, Outcome: "unknown"})
+				digestSkills = append(digestSkills, DigestSkill{SkillID: d.SkillID, Outcome: OutcomeUnknown})
 				return
 			}
 
@@ -223,8 +223,7 @@ func (h *HandlerV2) Handle(ctx context.Context, payload PhaseArchivedReceived) e
 				}
 			}
 
-			outcome := "success"
-			digestSkills = append(digestSkills, DigestSkill{SkillID: d.SkillID, Outcome: outcome})
+			digestSkills = append(digestSkills, DigestSkill{SkillID: d.SkillID, Outcome: OutcomeSuccess})
 		}()
 	}
 

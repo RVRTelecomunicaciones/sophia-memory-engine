@@ -13,7 +13,7 @@ package consolidation
 func FilterDigestSkills(in []DigestSkill) []DigestSkill {
 	out := make([]DigestSkill, 0, len(in))
 	for _, s := range in {
-		if s.Outcome == "unknown" {
+		if s.Outcome == OutcomeUnknown {
 			continue
 		}
 		out = append(out, s)
