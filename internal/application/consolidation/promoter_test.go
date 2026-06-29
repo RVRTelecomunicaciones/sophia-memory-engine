@@ -212,17 +212,17 @@ func TestPromoter_RollbackCount_BlocksPromotion_Regression(t *testing.T) {
 			rollback:  2,
 			wantOK:    false,
 		},
-		// SPEC DIVERGENCE NOTE: skill-promoter-regression spec §"Low-risk skill is not gated
-		// on rollback_count" requires wantOK=true, but the current promoter code at line 79
-		// applies the rollback check uniformly: snap.Metrics.RollbackCount > t.RollbackCount
-		// where t.RollbackCount=0 (zero-value) for low-risk. This means low-risk IS gated.
-		// This test locks the ACTUAL current behavior (not promoted). The spec divergence
-		// must be resolved before this PR merges — see risks in the apply-progress report.
+		// POLICY: rollback gates promotion at EVERY risk level, including low.
+		// The generic check (promoter.go:79) `RollbackCount > t.RollbackCount` with
+		// the low-risk threshold's zero-value (0) blocks any rollback — consistent
+		// with low already being gated on failure==0 (D-M2-6): a rollback is an
+		// equally-strong negative signal. This is the intended behavior, confirmed
+		// by operator decision and locked here (spec amended to match).
 		{
-			name:      "low rollback=1 → NOT promoted (promoter gates low-risk via zero-value threshold — spec divergence)",
+			name:      "low rollback=1 → NOT promoted (rollback gates promotion at all risk levels)",
 			riskLevel: "low",
 			rollback:  1,
-			wantOK:    false, // ACTUAL behavior; spec says true — divergence logged
+			wantOK:    false,
 		},
 	}
 
