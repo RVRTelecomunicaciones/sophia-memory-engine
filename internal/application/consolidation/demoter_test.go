@@ -106,6 +106,84 @@ func TestDemoter_BothConditions_BlockedTakesPrecedence(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// L.6: rollback_count >= 1 → blocked (M3-reachable via skill-risk-instrumentation)
+// ---------------------------------------------------------------------------
+
+func TestDemoter_RollbackCount_Blocked(t *testing.T) {
+	tests := []struct {
+		name          string
+		rollback      int
+		failure       int
+		usage         int
+		retryReduction float64
+		wantOK        bool
+		wantStatus    string
+	}{
+		{
+			name:       "rollback=1,failure=0,usage=10 → blocked",
+			rollback:   1,
+			failure:    0,
+			usage:      10,
+			wantOK:     true,
+			wantStatus: "blocked",
+		},
+		{
+			name:       "rollback=2 → blocked",
+			rollback:   2,
+			failure:    0,
+			usage:      10,
+			wantOK:     true,
+			wantStatus: "blocked",
+		},
+		{
+			name:    "rollback=0,failure=0,usage=10 → no demotion on rollback axis",
+			rollback: 0,
+			failure:  0,
+			usage:    10,
+			wantOK:  false,
+		},
+		{
+			name:          "rollback=1 AND failureRatio>0.15 → blocked (rollback short-circuits, result still blocked)",
+			rollback:      1,
+			failure:       2,
+			usage:         10, // ratio=0.20 > 0.15
+			wantOK:        true,
+			wantStatus:    "blocked",
+		},
+		{
+			name:           "rollback=1 AND retryReduction=0.03 → blocked only (short-circuits deprecated eval)",
+			rollback:       1,
+			failure:        0,
+			usage:          10,
+			retryReduction: 0.03, // would trigger deprecated if rollback didn't fire first
+			wantOK:         true,
+			wantStatus:     "blocked",
+		},
+	}
+
+	d := consolidation.NewDemoter()
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			snap := &outbound.SkillSnapshot{
+				Status:    "active",
+				RiskLevel: "medium",
+				Metrics: outbound.SkillMetrics{
+					RollbackCount:     tc.rollback,
+					FailureCount:      tc.failure,
+					UsageCount:        tc.usage,
+					AvgRetryReduction: tc.retryReduction,
+				},
+			}
+			status, ok := d.Evaluate(context.Background(), snap)
+			assert.Equal(t, tc.wantOK, ok, "unexpected demotion result for: %s", tc.name)
+			if tc.wantOK {
+				assert.Equal(t, tc.wantStatus, status)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
 // L.5: non-active skill → no demotion
 // ---------------------------------------------------------------------------
 
