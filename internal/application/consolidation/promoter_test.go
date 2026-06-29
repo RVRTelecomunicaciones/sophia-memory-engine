@@ -175,6 +175,94 @@ func TestPromoter_FailureCountBlocksPromotion(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// K.6: rollback_count >= 1 blocks promotion for medium/high/critical
+//      Regression lock: promoter.go:79 guard must remain intact.
+//      If any sub-test is RED on first run, the guard was already broken —
+//      STOP and report; do NOT fix the promoter here (different change scope).
+// ---------------------------------------------------------------------------
+
+func TestPromoter_RollbackCount_BlocksPromotion_Regression(t *testing.T) {
+	tests := []struct {
+		name      string
+		riskLevel string
+		rollback  int
+		wantOK    bool
+	}{
+		{
+			name:      "medium rollback=1 → not promoted",
+			riskLevel: "medium",
+			rollback:  1,
+			wantOK:    false,
+		},
+		{
+			name:      "high rollback=1 → not promoted",
+			riskLevel: "high",
+			rollback:  1,
+			wantOK:    false,
+		},
+		{
+			name:      "critical rollback=1 → not promoted",
+			riskLevel: "critical",
+			rollback:  1,
+			wantOK:    false,
+		},
+		{
+			name:      "medium rollback=2 → not promoted",
+			riskLevel: "medium",
+			rollback:  2,
+			wantOK:    false,
+		},
+		// POLICY: rollback gates promotion at EVERY risk level, including low.
+		// The generic check (promoter.go:79) `RollbackCount > t.RollbackCount` with
+		// the low-risk threshold's zero-value (0) blocks any rollback — consistent
+		// with low already being gated on failure==0 (D-M2-6): a rollback is an
+		// equally-strong negative signal. This is the intended behavior, confirmed
+		// by operator decision and locked here (spec amended to match).
+		{
+			name:      "low rollback=1 → NOT promoted (rollback gates promotion at all risk levels)",
+			riskLevel: "low",
+			rollback:  1,
+			wantOK:    false,
+		},
+	}
+
+	p := consolidation.NewPromoter()
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var snap *outbound.SkillSnapshot
+			switch tc.riskLevel {
+			case "low":
+				snap = &outbound.SkillSnapshot{
+					Status:    "candidate",
+					RiskLevel: "low",
+					Metrics: outbound.SkillMetrics{
+						SuccessCount:     1,
+						TestsPassedCount: 1,
+						FailureCount:     0,
+						RollbackCount:    tc.rollback,
+					},
+				}
+			default:
+				snap = &outbound.SkillSnapshot{
+					Status:    "candidate",
+					RiskLevel: tc.riskLevel,
+					Metrics: outbound.SkillMetrics{
+						SuccessCount:      2,
+						TestsPassedCount:  2,
+						FailureCount:      0,
+						RollbackCount:     tc.rollback,
+						DeprecatedAPIHits: 0,
+						AvgRetryReduction: 0.25,
+					},
+				}
+			}
+			_, ok := p.Evaluate(context.Background(), snap)
+			assert.Equal(t, tc.wantOK, ok, "promotion result unexpected for: %s", tc.name)
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
 // K.5: non-candidate skill → no transition
 // ---------------------------------------------------------------------------
 

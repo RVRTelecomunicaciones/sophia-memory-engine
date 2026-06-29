@@ -9,14 +9,16 @@ import (
 // Demoter evaluates whether an active skill should be demoted to "blocked"
 // or "deprecated" based on the V4.1 §6.3 reachability table (D-M2-7).
 //
+// M3-reachable paths (skill-risk-instrumentation):
+//   - active→blocked:     rollback_count >= 1 (first check — short-circuits ratio math)
+//
 // M2 reachable paths:
 //   - active→blocked:     failure_count / max(usage_count, 1) > 0.15
 //   - active→deprecated:  avg_retry_reduction < 0.05 (proxy via D-M2-11)
 //
 // M4+ unreachable paths (instrumentation gaps, noted in comments):
-//   - active→deprecated:  deprecated_api_hits >= 1 (always 0 in M2)
-//   - active→deprecated:  last_stack_version mismatch (NULL in M2)
-//   - active→blocked:     rollback_count >= 1 (always 0 in M2)
+//   - active→deprecated:  deprecated_api_hits >= 1 (always 0 in M2/M3)
+//   - active→deprecated:  last_stack_version mismatch (NULL in M2/M3)
 //
 // Precedence: "blocked" > "deprecated" when both conditions are simultaneously met.
 // The Demoter satisfies the SkillDemoter interface.
@@ -37,6 +39,12 @@ const retryReductionThreshold = 0.05
 func (d *Demoter) Evaluate(_ context.Context, snap *outbound.SkillSnapshot) (string, bool) {
 	if snap.Status != "active" {
 		return "", false
+	}
+
+	// RollbackCount >= 1 → immediate block (M3-reachable via skill-risk-instrumentation).
+	// This short-circuits before any ratio arithmetic, consistent with blocked-takes-precedence semantics.
+	if snap.Metrics.RollbackCount >= 1 {
+		return "blocked", true
 	}
 
 	// Check blocked condition first (higher precedence).
