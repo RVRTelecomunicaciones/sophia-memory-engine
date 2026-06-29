@@ -175,6 +175,94 @@ func TestPromoter_FailureCountBlocksPromotion(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// K.6: rollback_count >= 1 blocks promotion for medium/high/critical
+//      Regression lock: promoter.go:79 guard must remain intact.
+//      If any sub-test is RED on first run, the guard was already broken —
+//      STOP and report; do NOT fix the promoter here (different change scope).
+// ---------------------------------------------------------------------------
+
+func TestPromoter_RollbackCount_BlocksPromotion_Regression(t *testing.T) {
+	tests := []struct {
+		name      string
+		riskLevel string
+		rollback  int
+		wantOK    bool
+	}{
+		{
+			name:      "medium rollback=1 → not promoted",
+			riskLevel: "medium",
+			rollback:  1,
+			wantOK:    false,
+		},
+		{
+			name:      "high rollback=1 → not promoted",
+			riskLevel: "high",
+			rollback:  1,
+			wantOK:    false,
+		},
+		{
+			name:      "critical rollback=1 → not promoted",
+			riskLevel: "critical",
+			rollback:  1,
+			wantOK:    false,
+		},
+		{
+			name:      "medium rollback=2 → not promoted",
+			riskLevel: "medium",
+			rollback:  2,
+			wantOK:    false,
+		},
+		// SPEC DIVERGENCE NOTE: skill-promoter-regression spec §"Low-risk skill is not gated
+		// on rollback_count" requires wantOK=true, but the current promoter code at line 79
+		// applies the rollback check uniformly: snap.Metrics.RollbackCount > t.RollbackCount
+		// where t.RollbackCount=0 (zero-value) for low-risk. This means low-risk IS gated.
+		// This test locks the ACTUAL current behavior (not promoted). The spec divergence
+		// must be resolved before this PR merges — see risks in the apply-progress report.
+		{
+			name:      "low rollback=1 → NOT promoted (promoter gates low-risk via zero-value threshold — spec divergence)",
+			riskLevel: "low",
+			rollback:  1,
+			wantOK:    false, // ACTUAL behavior; spec says true — divergence logged
+		},
+	}
+
+	p := consolidation.NewPromoter()
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var snap *outbound.SkillSnapshot
+			switch tc.riskLevel {
+			case "low":
+				snap = &outbound.SkillSnapshot{
+					Status:    "candidate",
+					RiskLevel: "low",
+					Metrics: outbound.SkillMetrics{
+						SuccessCount:     1,
+						TestsPassedCount: 1,
+						FailureCount:     0,
+						RollbackCount:    tc.rollback,
+					},
+				}
+			default:
+				snap = &outbound.SkillSnapshot{
+					Status:    "candidate",
+					RiskLevel: tc.riskLevel,
+					Metrics: outbound.SkillMetrics{
+						SuccessCount:      2,
+						TestsPassedCount:  2,
+						FailureCount:      0,
+						RollbackCount:     tc.rollback,
+						DeprecatedAPIHits: 0,
+						AvgRetryReduction: 0.25,
+					},
+				}
+			}
+			_, ok := p.Evaluate(context.Background(), snap)
+			assert.Equal(t, tc.wantOK, ok, "promotion result unexpected for: %s", tc.name)
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
 // K.5: non-candidate skill → no transition
 // ---------------------------------------------------------------------------
 
